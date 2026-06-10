@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum InventoryStatus {
+  ACTIVE
+  LOW_STOCK
+  EXPIRED
+  DISPOSED
+  ARCHIVED
+}
+
+enum InventoryEventType {
+  INITIAL
+  RESTOCK
+  CONSUME
+  DISPOSE
+  ADJUST
+}
+
+enum ProtocolStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum RunStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABORTED
+}
+
+enum RunResultStatus {
+  SUCCESS
+  FAILED
+  ABORTED
+}
+
+enum FileKind {
+  CHEMICAL_IMAGE
+  PROTOCOL_VIDEO
+  PROTOCOL_ATTACHMENT
+  RUN_ATTACHMENT
+}
+
+enum PurchaseOrderStatus {
+  PENDING
+  ORDERED
+  ARRIVED
+  CANCELED
+}
+
+model User {
+  id            String          @id @default(uuid())
+  email         String          @unique
+  name          String
+  passwordHash  String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  memberships   TeamMember[]
+  teamsOwned    Team[]          @relation("TeamOwner")
+  invitesCreated TeamInvite[]   @relation("InviteCreator")
+  inventoryEvents InventoryEvent[]
+  protocols     Protocol[]      @relation("ProtocolCreator")
+  experimentRuns ExperimentRun[]
+  files         FileAsset[]     @relation("FileUploader")
+  auditLogs     AuditLog[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model Team {
+  id                String        @id @default(uuid())
+  name              String
+  ownerUserId       String
+  fileUploadEnabled Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  owner             User          @relation("TeamOwner", fields: [ownerUserId], references: [id])
+  members           TeamMember[]
+  invites           TeamInvite[]
+  inventoryItems    InventoryItem[]
+  protocols         Protocol[]
+  experimentRuns    ExperimentRun[]
+  files             FileAsset[]
+  auditLogs         AuditLog[]
+  purchaseOrders    PurchaseOrder[]
+}
+
+model TeamMember {
+  id             String   @id @default(uuid())
+  teamId         String
+  userId         String
+  role           TeamRole @default(MEMBER)
+  canViewAllRuns Boolean  @default(false)
+  joinedAt       DateTime @default(now())
+  team           Team     @relation(fields: [teamId], references: [id])
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+  @@index([userId])
+}
+
+model TeamInvite {
+  id              String   @id @default(uuid())
+  teamId          String
+  token           String   @unique
+  createdByUserId String
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime @default(now())
+  team            Team     @relation(fields: [teamId], references: [id])
+  createdBy       User     @relation("InviteCreator", fields: [createdByUserId], references: [id])
+}
+
+model InventoryItem {
+  id              String           @id @default(uuid())
+  teamId          String
+  name            String
+  alias           String?
+  casNumber       String?
+  specification   String?
+  supplier        String?
+  catalogNumber   String?
+  batchNumber     String?
+  quantity        Decimal          @db.Decimal(12, 3)
+  unit            String
+  location        String
+  expiresAt       DateTime?
+  status          InventoryStatus  @default(ACTIVE)
+  hazardTags      Json?
+  notes           String?          @db.Text
+  imageFileId     String?
+  deletedAt       DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  team            Team             @relation(fields: [teamId], references: [id])
+  imageFile       FileAsset?       @relation("InventoryImage", fields: [imageFileId], references: [id])
+  events          InventoryEvent[]
+
+  @@index([teamId, name])
+  @@index([teamId, status])
+}
+
+model InventoryEvent {
+  id           String             @id @default(uuid())
+  teamId       String
+  itemId       String
+  userId       String
+  type         InventoryEventType
+  quantityBefore Decimal          @db.Decimal(12, 3)
+  quantityDelta  Decimal          @db.Decimal(12, 3)
+  quantityAfter  Decimal          @db.Decimal(12, 3)
+  reason       String?
+  createdAt    DateTime           @default(now())
+  item         InventoryItem       @relation(fields: [itemId], references: [id])
+  user         User                @relation(fields: [userId], references: [id])
+
+  @@index([teamId, itemId, createdAt])
+}
+
+model Protocol {
+  id              String          @id @default(uuid())
+  teamId          String
+  createdByUserId String
+  title           String
+  description     String?         @db.Text
+  tags            Json?
+  externalVideoUrl String?
+  status          ProtocolStatus  @default(ACTIVE)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  team            Team            @relation(fields: [teamId], references: [id])
+  createdBy       User            @relation("ProtocolCreator", fields: [createdByUserId], references: [id])
+  steps           ProtocolStep[]
+  runs            ExperimentRun[]
+  files           FileAsset[]     @relation("ProtocolFiles")
+
+  @@index([teamId, status])
+}
+
+model ProtocolStep {
+  id          String    @id @default(uuid())
+  protocolId  String
+  orderIndex  Int
+  title       String
+  description String?   @db.Text
+  protocol    Protocol  @relation(fields: [protocolId], references: [id])
+  runSteps    RunStep[]
+
+  @@index([protocolId, orderIndex])
+}
+
+model ExperimentRun {
+  id              String          @id @default(uuid())
+  teamId          String
+  protocolId      String
+  operatorUserId  String
+  status          RunStatus       @default(IN_PROGRESS)
+  resultStatus    RunResultStatus?
+  failureReason   String?         @db.Text
+  failureStepId   String?
+  failureNotes    String?         @db.Text
+  startedAt       DateTime        @default(now())
+  completedAt     DateTime?
+  team            Team            @relation(fields: [teamId], references: [id])
+  protocol        Protocol        @relation(fields: [protocolId], references: [id])
+  operator        User            @relation(fields: [operatorUserId], references: [id])
+  steps           RunStep[]
+  files           FileAsset[]     @relation("RunFiles")
+
+  @@index([teamId, operatorUserId, startedAt])
+}
+
+model RunStep {
+  id              String        @id @default(uuid())
+  runId           String
+  protocolStepId  String?
+  orderIndex      Int
+  title           String
+  description     String?       @db.Text
+  completedAt     DateTime?
+  notes           String?       @db.Text
+  run             ExperimentRun @relation(fields: [runId], references: [id])
+  protocolStep    ProtocolStep? @relation(fields: [protocolStepId], references: [id])
+
+  @@index([runId, orderIndex])
+}
+
+model FileAsset {
+  id              String     @id @default(uuid())
+  teamId          String
+  uploadedByUserId String
+  kind            FileKind
+  originalName    String
+  mimeType        String
+  sizeBytes       BigInt
+  storageProvider String
+  storageKey      String
+  publicUrl       String?
+  protocolId      String?
+  runId           String?
+  createdAt       DateTime   @default(now())
+  team            Team       @relation(fields: [teamId], references: [id])
+  uploadedBy      User       @relation("FileUploader", fields: [uploadedByUserId], references: [id])
+  protocol        Protocol?  @relation("ProtocolFiles", fields: [protocolId], references: [id])
+  run             ExperimentRun? @relation("RunFiles", fields: [runId], references: [id])
+  inventoryImages InventoryItem[] @relation("InventoryImage")
+
+  @@index([teamId, kind, createdAt])
+}
+
+model PurchaseOrder {
+  id                String              @id @default(uuid())
+  teamId            String
+  requestedByUserId String
+  chemicalName      String
+  specification     String?
+  supplier          String?
+  quantity          Decimal             @db.Decimal(12, 3)
+  unit              String
+  note              String?             @db.Text
+  status            PurchaseOrderStatus @default(PENDING)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  team              Team                @relation(fields: [teamId], references: [id])
+  requestedBy       User                @relation(fields: [requestedByUserId], references: [id])
+
+  @@index([teamId, status, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  team      Team     @relation(fields: [teamId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([teamId, createdAt])
+}

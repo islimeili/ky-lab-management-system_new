@@ -1,0 +1,21 @@
+{
+  "name": "laboratory-management-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web \"npm --workspace api run dev\" \"npm --workspace web run dev\"",
+    "dev:api": "npm --workspace api run dev",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm --workspace api run build && npm --workspace web run build",
+    "lint": "npm --workspace web run lint",
+    "prisma:generate": "npm --workspace api run prisma:generate",
+    "prisma:migrate": "npm --workspace api run prisma:migrate"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
