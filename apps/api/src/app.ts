@@ -43,9 +43,17 @@ export async function buildApp() {
       return;
     }
 
-    const knownError = error as { code?: string };
+    const knownError = error as { code?: string; meta?: { target?: unknown } };
     if (knownError.code === "P2002") {
-      await reply.code(409).send({ message: "记录已存在" });
+      const target = Array.isArray(knownError.meta?.target) ? knownError.meta.target.join(",") : String(knownError.meta?.target ?? "");
+      await reply.code(409).send({
+        message: target.includes("email") ? "该邮箱已注册，请直接登录" : "记录已存在"
+      });
+      return;
+    }
+
+    if (knownError.code === "P2021" || knownError.code === "P2022") {
+      await reply.code(503).send({ message: "数据库尚未初始化，请在服务器执行 bash deploy/update-server.sh" });
       return;
     }
 
