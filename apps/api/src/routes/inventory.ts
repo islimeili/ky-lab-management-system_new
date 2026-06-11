@@ -75,6 +75,34 @@ export async function inventoryRoutes(app: FastifyInstance) {
     return { items: items.map(serializeInventoryItem) };
   });
 
+  app.get("/inventory/events", async (request, reply) => {
+    const query = z.object({
+      teamId: z.string(),
+      limit: z.coerce.number().int().min(1).max(100).optional()
+    }).parse(request.query);
+
+    const membership = await requireMembership(app, request as AuthenticatedRequest, reply, query.teamId);
+    if (!membership) return;
+
+    const events = await app.prisma.inventoryEvent.findMany({
+      where: { teamId: query.teamId },
+      include: {
+        item: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, email: true } }
+      },
+      orderBy: { createdAt: "desc" },
+      take: query.limit ?? 50
+    });
+
+    return {
+      events: events.map((event) => ({
+        ...serializeInventoryEvent(event),
+        itemName: event.item.name,
+        userName: event.user.name
+      }))
+    };
+  });
+
   app.get("/inventory/:itemId", async (request, reply) => {
     const params = z.object({ itemId: z.string() }).parse(request.params);
     const item = await app.prisma.inventoryItem.findUnique({

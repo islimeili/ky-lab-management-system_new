@@ -13,6 +13,7 @@ import {
   Package,
   Play,
   Plus,
+  RefreshCcw,
   Search,
   ShieldCheck,
   ShoppingCart,
@@ -21,7 +22,7 @@ import {
   Video,
   XCircle
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 
@@ -29,7 +30,28 @@ type Role = "OWNER" | "ADMIN" | "MEMBER";
 type InventoryStatus = "ACTIVE" | "LOW_STOCK" | "EXPIRED" | "DISPOSED" | "ARCHIVED";
 type RunResult = "SUCCESS" | "FAILED" | "ABORTED";
 type OrderStatus = "PENDING" | "ORDERED" | "ARRIVED" | "CANCELED";
-type TabKey = "dashboard" | "inventory" | "protocols" | "runs" | "team";
+type TabKey = "dashboard" | "inventory" | "orders" | "protocols" | "runs" | "team";
+
+type User = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+type Team = {
+  id: string;
+  name: string;
+  role: Role;
+  canViewAllRuns: boolean;
+  fileUploadEnabled: boolean;
+  joinedAt: string;
+};
+
+type Session = {
+  token: string;
+  user: User;
+  activeTeamId?: string;
+};
 
 type Member = {
   id: string;
@@ -81,6 +103,7 @@ type PurchaseOrder = {
   quantity: number;
   unit: string;
   requesterUserId: string;
+  requesterName?: string;
   requestedAt: string;
   status: OrderStatus;
   note?: string;
@@ -155,6 +178,7 @@ const orderStatusText: Record<OrderStatus, string> = {
   CANCELED: "已取消"
 };
 
+/*
 const initialMembers: Member[] = [
   {
     id: "u-owner",
@@ -327,16 +351,7 @@ const initialRuns: ExperimentRun[] = [
     ]
   }
 ];
-
-function nowText() {
-  return new Date().toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
+*/
 
 function makeId(prefix: string) {
   const randomValue =
@@ -355,18 +370,260 @@ function canViewAllRunRecords(member: Member) {
   return member.role === "OWNER" || member.canViewAllRuns;
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const SESSION_STORAGE_KEY = "labflow-session";
+
+type ApiRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): ApiRecord {
+  return value && typeof value === "object" ? value as ApiRecord : {};
+}
+
+function stringValue(value: unknown, fallback = "") {
+  return value === null || value === undefined ? fallback : String(value);
+}
+
+function optionalString(value: unknown) {
+  const text = stringValue(value).trim();
+  return text || undefined;
+}
+
+function readStoredSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as Session : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeSession(session: Session | null) {
+  if (session) {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  }
+}
+
+async function apiRequest<T>(path: string, token?: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (!response.ok) {
+    let message = `请求失败：${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string };
+      message = payload.message ?? message;
+    } catch {
+      // Keep the HTTP status message when the server did not return JSON.
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function displayDate(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function displayDateOnly(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
+
+function tokenizedFileUrl(publicUrl: string | undefined, token: string) {
+  if (!publicUrl) return undefined;
+  return `${API_BASE}${publicUrl}?token=${encodeURIComponent(token)}`;
+}
+
+function mapMember(membership: ApiRecord): Member {
+  const user = asRecord(membership.user);
+  return {
+    id: stringValue(user.id ?? membership.userId),
+    name: stringValue(user.name, "未命名成员"),
+    email: stringValue(user.email),
+    role: membership.role as Role,
+    canViewAllRuns: membership.role === "OWNER" || Boolean(membership.canViewAllRuns),
+    joinedAt: displayDate(stringValue(membership.joinedAt))
+  };
+}
+
+function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
+  const tags = Array.isArray(item.hazardTags) ? item.hazardTags.map(String) : [];
+  const imageFile = asRecord(item.imageFile);
+  return {
+    id: stringValue(item.id),
+    name: stringValue(item.name),
+    alias: optionalString(item.alias),
+    casNumber: optionalString(item.casNumber),
+    specification: stringValue(item.specification),
+    supplier: stringValue(item.supplier),
+    catalogNumber: optionalString(item.catalogNumber),
+    batchNumber: optionalString(item.batchNumber),
+    quantity: Number(item.quantity ?? 0),
+    unit: stringValue(item.unit),
+    location: stringValue(item.location),
+    expiresAt: displayDateOnly(stringValue(item.expiresAt)),
+    status: item.status as InventoryStatus,
+    hazardTags: tags,
+    notes: optionalString(item.notes),
+    imageUrl: tokenizedFileUrl(optionalString(imageFile.publicUrl), token),
+    updatedAt: displayDate(stringValue(item.updatedAt))
+  };
+}
+
+function mapInventoryEvent(event: ApiRecord): InventoryEvent {
+  const item = asRecord(event.item);
+  const user = asRecord(event.user);
+  return {
+    id: stringValue(event.id),
+    itemId: stringValue(event.itemId),
+    itemName: stringValue(event.itemName ?? item.name, "未知药品"),
+    type: event.type as InventoryEvent["type"],
+    before: Number(event.quantityBefore ?? event.before ?? 0),
+    delta: Number(event.quantityDelta ?? event.delta ?? 0),
+    after: Number(event.quantityAfter ?? event.after ?? 0),
+    reason: stringValue(event.reason),
+    userName: stringValue(event.userName ?? user.name, "未知成员"),
+    createdAt: displayDate(stringValue(event.createdAt))
+  };
+}
+
+function mapOrder(order: ApiRecord): PurchaseOrder {
+  const requestedBy = asRecord(order.requestedBy);
+  return {
+    id: stringValue(order.id),
+    chemicalName: stringValue(order.chemicalName),
+    specification: stringValue(order.specification),
+    supplier: optionalString(order.supplier),
+    quantity: Number(order.quantity ?? 0),
+    unit: stringValue(order.unit),
+    requesterUserId: stringValue(order.requestedByUserId),
+    requesterName: optionalString(requestedBy.name),
+    requestedAt: displayDate(stringValue(order.createdAt ?? order.requestedAt)),
+    status: order.status as OrderStatus,
+    note: optionalString(order.note)
+  };
+}
+
+function mapProtocol(protocol: ApiRecord): Protocol {
+  return {
+    id: stringValue(protocol.id),
+    title: stringValue(protocol.title),
+    description: stringValue(protocol.description),
+    tags: Array.isArray(protocol.tags) ? protocol.tags.map(String) : [],
+    externalVideoUrl: optionalString(protocol.externalVideoUrl),
+    createdByUserId: stringValue(protocol.createdByUserId),
+    updatedAt: displayDate(stringValue(protocol.updatedAt)),
+    steps: Array.isArray(protocol.steps)
+      ? protocol.steps.map((step: ApiRecord) => ({
+          id: stringValue(step.id),
+          title: stringValue(step.title),
+          description: optionalString(step.description)
+        }))
+      : []
+  };
+}
+
+function mapRun(run: ApiRecord): ExperimentRun {
+  return {
+    id: stringValue(run.id),
+    protocolId: stringValue(run.protocolId),
+    operatorUserId: stringValue(run.operatorUserId),
+    status: run.status as ExperimentRun["status"],
+    resultStatus: optionalString(run.resultStatus) as RunResult | undefined,
+    failureReason: optionalString(run.failureReason),
+    failureStepId: optionalString(run.failureStepId),
+    failureNotes: optionalString(run.failureNotes),
+    startedAt: displayDate(stringValue(run.startedAt)),
+    completedAt: displayDate(stringValue(run.completedAt)),
+    steps: Array.isArray(run.steps)
+      ? run.steps.map((step: ApiRecord) => ({
+          id: stringValue(step.id),
+          title: stringValue(step.title),
+          description: optionalString(step.description),
+          completedAt: displayDate(stringValue(step.completedAt)),
+          notes: optionalString(step.notes)
+        }))
+      : []
+  };
+}
+
+function extractInviteToken(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.searchParams.get("invite") ?? trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function nullableFormValue(form: FormData, key: string) {
+  const value = String(form.get(key) ?? "").trim();
+  return value || null;
+}
+
+function splitTags(value: string) {
+  return value
+    .split(/[，,]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function withoutTeamId(body: {
+  teamId: string;
+  title: string;
+  description: string | null;
+  tags: string[];
+  externalVideoUrl: string | null;
+  steps: { title: string; description: string | null }[];
+}) {
+  return {
+    title: body.title,
+    description: body.description,
+    tags: body.tags,
+    externalVideoUrl: body.externalVideoUrl,
+    steps: body.steps
+  };
+}
+
 function App() {
+  const [session, setSession] = useState<Session | null>(() => readStoredSession());
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
-  const [members, setMembers] = useState(initialMembers);
-  const [currentUserId, setCurrentUserId] = useState("u-owner");
-  const [inventory, setInventory] = useState(initialInventory);
-  const [events, setEvents] = useState(initialEvents);
-  const [orders, setOrders] = useState(initialOrders);
-  const [protocols, setProtocols] = useState(initialProtocols);
-  const [runs, setRuns] = useState(initialRuns);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [activeTeamId, setActiveTeamId] = useState(session?.activeTeamId ?? "");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [events, setEvents] = useState<InventoryEvent[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [protocols, setProtocols] = useState<Protocol[]>([]);
+  const [runs, setRuns] = useState<ExperimentRun[]>([]);
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [protocolQuery, setProtocolQuery] = useState("");
-  const [selectedRunId, setSelectedRunId] = useState("run-1");
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [showInventoryForm, setShowInventoryForm] = useState(false);
   const [showProtocolForm, setShowProtocolForm] = useState(false);
   const [editingProtocolId, setEditingProtocolId] = useState<string | null>(null);
@@ -378,20 +635,40 @@ function App() {
     failureStepId: "",
     failureNotes: ""
   });
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [inviteToken, setInviteToken] = useState(() => extractInviteToken(new URLSearchParams(window.location.search).get("invite") ?? ""));
+  const [inviteLink, setInviteLink] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const currentMember = members.find((member) => member.id === currentUserId) ?? members[0];
+  const activeTeam = teams.find((team) => team.id === activeTeamId);
+  const currentMember = members.find((member) => member.id === session?.user.id) ?? {
+    id: session?.user.id ?? "",
+    name: session?.user.name ?? "",
+    email: session?.user.email ?? "",
+    role: activeTeam?.role ?? "MEMBER",
+    canViewAllRuns: activeTeam?.canViewAllRuns ?? false,
+    joinedAt: activeTeam?.joinedAt ?? ""
+  };
   const canManageContent = canManage(currentMember.role);
   const isOwner = currentMember.role === "OWNER";
   const canViewAllRuns = canViewAllRunRecords(currentMember);
-  const visibleRuns = canViewAllRuns ? runs : runs.filter((run) => run.operatorUserId === currentMember.id);
-  const selectedRun = visibleRuns.find((run) => run.id === selectedRunId) ?? visibleRuns[0];
+  const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0];
   const selectedVisibleRunId = selectedRun?.id ?? "";
   const editingProtocol = protocols.find((protocol) => protocol.id === editingProtocolId);
 
+  useEffect(() => {
+    if (session) {
+      void loadWorkspace(session, session.activeTeamId);
+    }
+    // loadWorkspace is triggered only when a login token changes to avoid repeated refetch loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.token]);
+
   const stats = useMemo(() => {
     const lowStock = inventory.filter((item) => item.status === "LOW_STOCK" || item.quantity <= 2).length;
-    const activeRuns = visibleRuns.filter((run) => run.status === "IN_PROGRESS").length;
-    const failedRuns = visibleRuns.filter((run) => run.resultStatus === "FAILED").length;
+    const activeRuns = runs.filter((run) => run.status === "IN_PROGRESS").length;
+    const failedRuns = runs.filter((run) => run.resultStatus === "FAILED").length;
 
     return {
       chemicals: inventory.filter((item) => item.status !== "ARCHIVED").length,
@@ -400,7 +677,7 @@ function App() {
       activeRuns,
       failedRuns
     };
-  }, [inventory, protocols.length, visibleRuns]);
+  }, [inventory, protocols.length, runs]);
 
   const filteredInventory = inventory.filter((item) => {
     const text = `${item.name} ${item.alias ?? ""} ${item.casNumber ?? ""} ${item.location}`.toLowerCase();
@@ -412,22 +689,193 @@ function App() {
     return text.includes(protocolQuery.toLowerCase());
   });
 
-  function changeMemberRole(userId: string, role: "ADMIN" | "MEMBER") {
-    if (!isOwner) return;
-    setMembers((current) =>
-      current.map((member) => (member.id === userId && member.role !== "OWNER" ? { ...member, role } : member))
-    );
+  async function loadWorkspace(nextSession = session, requestedTeamId = activeTeamId) {
+    if (!nextSession) return;
+    setLoading(true);
+    setErrorMessage("");
+
+    try {
+      const teamPayload = await apiRequest<{ teams: Team[] }>("/teams", nextSession.token);
+      const nextTeams = teamPayload.teams.map((team) => ({
+        ...team,
+        joinedAt: displayDate(team.joinedAt)
+      }));
+      const resolvedTeamId = requestedTeamId && nextTeams.some((team) => team.id === requestedTeamId)
+        ? requestedTeamId
+        : nextTeams[0]?.id ?? "";
+
+      setTeams(nextTeams);
+      setActiveTeamId(resolvedTeamId);
+      const storedSession = { ...nextSession, activeTeamId: resolvedTeamId };
+      storeSession(storedSession);
+      setSession((current) => current && current.token === nextSession.token ? storedSession : current);
+
+      if (!resolvedTeamId) {
+        setMembers([]);
+        setInventory([]);
+        setEvents([]);
+        setOrders([]);
+        setProtocols([]);
+        setRuns([]);
+        return;
+      }
+
+      const [memberPayload, inventoryPayload, eventPayload, orderPayload, protocolPayload, runPayload] = await Promise.all([
+        apiRequest<{ members: ApiRecord[] }>(`/teams/${resolvedTeamId}/members`, nextSession.token),
+        apiRequest<{ items: ApiRecord[] }>(`/inventory?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
+        apiRequest<{ events: ApiRecord[] }>(`/inventory/events?teamId=${encodeURIComponent(resolvedTeamId)}&limit=50`, nextSession.token),
+        apiRequest<{ orders: ApiRecord[] }>(`/orders?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
+        apiRequest<{ protocols: ApiRecord[] }>(`/protocols?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
+        apiRequest<{ runs: ApiRecord[] }>(`/runs?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token)
+      ]);
+
+      const nextRuns = runPayload.runs.map(mapRun);
+      setMembers(memberPayload.members.map(mapMember));
+      setInventory(inventoryPayload.items.map((item) => mapInventoryItem(item, nextSession.token)));
+      setEvents(eventPayload.events.map(mapInventoryEvent));
+      setOrders(orderPayload.orders.map(mapOrder));
+      setProtocols(protocolPayload.protocols.map(mapProtocol));
+      setRuns(nextRuns);
+      setSelectedRunId((current) => nextRuns.some((run) => run.id === current) ? current : nextRuns[0]?.id ?? "");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "加载数据失败");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function toggleRunVisibility(userId: string) {
-    if (!isOwner) return;
-    setMembers((current) =>
-      current.map((member) =>
-        member.id === userId && member.role !== "OWNER"
-          ? { ...member, canViewAllRuns: !member.canViewAllRuns }
-          : member
-      )
-    );
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await authenticate("/auth/login", {
+      email: String(form.get("email") ?? ""),
+      password: String(form.get("password") ?? "")
+    }, String(form.get("inviteToken") ?? inviteToken));
+  }
+
+  async function handleRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const teamName = String(form.get("teamName") ?? "").trim();
+    await authenticate("/auth/register", {
+      email: String(form.get("email") ?? ""),
+      password: String(form.get("password") ?? ""),
+      name: String(form.get("name") ?? ""),
+      teamName: teamName || undefined
+    }, String(form.get("inviteToken") ?? inviteToken));
+  }
+
+  async function authenticate(path: "/auth/login" | "/auth/register", body: ApiRecord, rawInviteToken: string) {
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      const payload = await apiRequest<{ token: string; user: User; activeTeamId?: string }>(path, undefined, {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+      const nextInviteToken = extractInviteToken(rawInviteToken);
+      if (nextInviteToken) {
+        await apiRequest(`/teams/join/${encodeURIComponent(nextInviteToken)}`, payload.token, { method: "POST" });
+      }
+      const nextSession = { token: payload.token, user: payload.user, activeTeamId: payload.activeTeamId };
+      storeSession(nextSession);
+      setSession(nextSession);
+      setInviteToken("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "登录失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function logout() {
+    storeSession(null);
+    setSession(null);
+    setTeams([]);
+    setActiveTeamId("");
+    setMembers([]);
+    setInventory([]);
+    setEvents([]);
+    setOrders([]);
+    setProtocols([]);
+    setRuns([]);
+  }
+
+  async function handleTeamChange(teamId: string) {
+    if (!session) return;
+    setActiveTeamId(teamId);
+    await loadWorkspace({ ...session, activeTeamId: teamId }, teamId);
+  }
+
+  async function createTeam(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    if (!name) return;
+
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      const payload = await apiRequest<{ team: { id: string } }>("/teams", session.token, {
+        method: "POST",
+        body: JSON.stringify({ name })
+      });
+      event.currentTarget.reset();
+      await loadWorkspace(session, payload.team.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "创建团队失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function joinTeam(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) return;
+    const form = new FormData(event.currentTarget);
+    const token = extractInviteToken(String(form.get("token") ?? ""));
+    if (!token) return;
+
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await apiRequest(`/teams/join/${encodeURIComponent(token)}`, session.token, { method: "POST" });
+      event.currentTarget.reset();
+      await loadWorkspace(session);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "加入团队失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function changeMemberRole(userId: string, role: "ADMIN" | "MEMBER") {
+    if (!session || !activeTeamId || !isOwner) return;
+    await apiRequest(`/teams/${activeTeamId}/members/${userId}/role`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({ role })
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function toggleRunVisibility(userId: string) {
+    if (!session || !activeTeamId || !isOwner) return;
+    const target = members.find((member) => member.id === userId);
+    if (!target) return;
+    await apiRequest(`/teams/${activeTeamId}/members/${userId}/run-visibility`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({ canViewAllRuns: !target.canViewAllRuns })
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function createInvite() {
+    if (!session || !activeTeamId || !canManageContent) return;
+    const payload = await apiRequest<{ invite: { token: string } }>(`/teams/${activeTeamId}/invites`, session.token, {
+      method: "POST"
+    });
+    setInviteLink(`${window.location.origin}${window.location.pathname}?invite=${payload.invite.token}`);
   }
 
   function openNewProtocolForm() {
@@ -439,15 +887,12 @@ function App() {
   function openEditProtocolForm(protocolId: string) {
     const protocol = protocols.find((item) => item.id === protocolId);
     if (!protocol || !canManageContent) return;
-
     setEditingProtocolId(protocol.id);
-    setProtocolStepDrafts(
-      protocol.steps.map((step) => ({
-        id: makeId("draft"),
-        title: step.title,
-        description: step.description ?? ""
-      }))
-    );
+    setProtocolStepDrafts(protocol.steps.map((step) => ({
+      id: makeId("draft"),
+      title: step.title,
+      description: step.description ?? ""
+    })));
     setShowProtocolForm(true);
   }
 
@@ -457,231 +902,191 @@ function App() {
     setShowProtocolForm(false);
   }
 
-  function archiveProtocol(protocolId: string) {
-    if (!canManageContent) return;
-    setProtocols((current) => current.filter((protocol) => protocol.id !== protocolId));
+  async function archiveProtocol(protocolId: string) {
+    if (!session || !canManageContent) return;
+    await apiRequest(`/protocols/${protocolId}/archive`, session.token, { method: "PATCH" });
+    await loadWorkspace(session, activeTeamId);
   }
 
-  function addInventoryItem(event: FormEvent<HTMLFormElement>) {
+  async function addInventoryItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canManageContent) return;
-
-    const form = new FormData(event.currentTarget);
+    if (!session || !activeTeamId || !canManageContent) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const image = form.get("image") as File | null;
-    const imageUrl = image && image.size > 0 ? URL.createObjectURL(image) : undefined;
-    const name = String(form.get("name") ?? "").trim();
-    const quantity = Number(form.get("quantity") ?? 0);
 
-    if (!name) return;
+    let imageFileId: string | undefined;
+    if (image && image.size > 0) {
+      const fileForm = new FormData();
+      fileForm.set("file", image);
+      const filePayload = await apiRequest<{ file: { id: string } }>(`/files?teamId=${activeTeamId}&kind=CHEMICAL_IMAGE`, session.token, {
+        method: "POST",
+        body: fileForm
+      });
+      imageFileId = filePayload.file.id;
+    }
 
-    const item: InventoryItem = {
-      id: makeId("chem"),
-      name,
-      alias: String(form.get("alias") ?? ""),
-      casNumber: String(form.get("casNumber") ?? ""),
-      specification: String(form.get("specification") ?? ""),
-      supplier: String(form.get("supplier") ?? ""),
-      catalogNumber: String(form.get("catalogNumber") ?? ""),
-      batchNumber: String(form.get("batchNumber") ?? ""),
-      quantity,
-      unit: String(form.get("unit") ?? "瓶"),
-      location: String(form.get("location") ?? ""),
-      expiresAt: String(form.get("expiresAt") ?? ""),
-      status: quantity <= 2 ? "LOW_STOCK" : "ACTIVE",
-      hazardTags: String(form.get("hazardTags") ?? "")
-        .split(/[，,]/)
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-      notes: String(form.get("notes") ?? ""),
-      imageUrl,
-      updatedAt: nowText()
-    };
-
-    setInventory((current) => [item, ...current]);
-    setEvents((current) => [
-      {
-        id: makeId("evt"),
-        itemId: item.id,
-        itemName: item.name,
-        type: "INITIAL",
-        before: 0,
-        delta: item.quantity,
-        after: item.quantity,
-        reason: "初始录入",
-        userName: currentMember.name,
-        createdAt: nowText()
-      },
-      ...current
-    ]);
-    event.currentTarget.reset();
-    setShowInventoryForm(false);
-  }
-
-  function adjustStock(itemId: string, type: InventoryEvent["type"], rawDelta: number, reason: string) {
-    if (!canManageContent) return;
-    setInventory((current) =>
-      current.map((item) => {
-        if (item.id !== itemId) return item;
-        const delta = type === "CONSUME" || type === "DISPOSE" ? -Math.abs(rawDelta) : Math.abs(rawDelta);
-        const nextQuantity = Math.max(0, item.quantity + delta);
-        const finalStatus: InventoryStatus = type === "DISPOSE" && nextQuantity === 0 ? "DISPOSED" : nextQuantity <= 2 ? "LOW_STOCK" : "ACTIVE";
-
-        setEvents((existing) => [
-          {
-            id: makeId("evt"),
-            itemId: item.id,
-            itemName: item.name,
-            type,
-            before: item.quantity,
-            delta: nextQuantity - item.quantity,
-            after: nextQuantity,
-            reason,
-            userName: currentMember.name,
-            createdAt: nowText()
-          },
-          ...existing
-        ]);
-
-        return {
-          ...item,
-          quantity: nextQuantity,
-          status: finalStatus,
-          updatedAt: nowText()
-        };
+    await apiRequest("/inventory", session.token, {
+      method: "POST",
+      body: JSON.stringify({
+        teamId: activeTeamId,
+        name: String(form.get("name") ?? "").trim(),
+        alias: nullableFormValue(form, "alias"),
+        casNumber: nullableFormValue(form, "casNumber"),
+        specification: nullableFormValue(form, "specification"),
+        supplier: nullableFormValue(form, "supplier"),
+        catalogNumber: nullableFormValue(form, "catalogNumber"),
+        batchNumber: nullableFormValue(form, "batchNumber"),
+        quantity: Number(form.get("quantity") ?? 0),
+        unit: String(form.get("unit") ?? "瓶"),
+        location: String(form.get("location") ?? ""),
+        expiresAt: nullableFormValue(form, "expiresAt"),
+        hazardTags: splitTags(String(form.get("hazardTags") ?? "")),
+        notes: nullableFormValue(form, "notes"),
+        imageFileId
       })
-    );
+    });
+
+    formElement.reset();
+    setShowInventoryForm(false);
+    await loadWorkspace(session, activeTeamId);
   }
 
-  function addOrderRequest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const form = new FormData(event.currentTarget);
-    const chemicalName = String(form.get("chemicalName") ?? "").trim();
-    const quantity = Number(form.get("quantity") ?? 0);
-
-    if (!chemicalName || quantity <= 0) return;
-
-    const order: PurchaseOrder = {
-      id: makeId("order"),
-      chemicalName,
-      specification: String(form.get("specification") ?? ""),
-      supplier: String(form.get("supplier") ?? ""),
-      quantity,
-      unit: String(form.get("unit") ?? "瓶"),
-      requesterUserId: currentMember.id,
-      requestedAt: nowText(),
-      status: "PENDING",
-      note: String(form.get("note") ?? "")
-    };
-
-    setOrders((current) => [order, ...current]);
-    event.currentTarget.reset();
+  async function adjustStock(itemId: string, type: InventoryEvent["type"], quantityDelta: number, reason: string) {
+    if (!session || !canManageContent) return;
+    await apiRequest(`/inventory/${itemId}/events`, session.token, {
+      method: "POST",
+      body: JSON.stringify({ type, quantityDelta, reason })
+    });
+    await loadWorkspace(session, activeTeamId);
   }
 
-  function addProtocol(event: FormEvent<HTMLFormElement>) {
+  async function addOrderRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canManageContent) return;
+    if (!session || !activeTeamId) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    await apiRequest("/orders", session.token, {
+      method: "POST",
+      body: JSON.stringify({
+        teamId: activeTeamId,
+        chemicalName: String(form.get("chemicalName") ?? "").trim(),
+        specification: nullableFormValue(form, "specification"),
+        supplier: nullableFormValue(form, "supplier"),
+        quantity: Number(form.get("quantity") ?? 0),
+        unit: String(form.get("unit") ?? "瓶"),
+        note: nullableFormValue(form, "note")
+      })
+    });
+    formElement.reset();
+    await loadWorkspace(session, activeTeamId);
+  }
 
-    const form = new FormData(event.currentTarget);
+  async function updateOrderStatus(orderId: string, status: OrderStatus) {
+    if (!session || !canManageContent) return;
+    await apiRequest(`/orders/${orderId}/status`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({ status })
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function addProtocol(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId || !canManageContent) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const title = String(form.get("title") ?? "").trim();
-    const validSteps = protocolStepDrafts
-      .map((step) => ({
-        title: step.title.trim(),
-        description: step.description.trim()
-      }))
+    const steps = protocolStepDrafts
+      .map((step) => ({ title: step.title.trim(), description: step.description.trim() || null }))
       .filter((step) => step.title);
+    if (!title || steps.length === 0) return;
 
-    if (!title || validSteps.length === 0) return;
-
-    const nextProtocol: Protocol = {
-      id: editingProtocolId ?? makeId("protocol"),
+    const body = {
+      teamId: activeTeamId,
       title,
-      description: String(form.get("description") ?? ""),
-      tags: String(form.get("tags") ?? "")
-        .split(/[，,]/)
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-      externalVideoUrl: String(form.get("externalVideoUrl") ?? ""),
-      createdByUserId: editingProtocol?.createdByUserId ?? currentMember.id,
-      updatedAt: nowText(),
-      steps: validSteps.map((step) => ({
-        id: makeId("step"),
-        title: step.title,
-        description: step.description
-      }))
+      description: nullableFormValue(form, "description"),
+      tags: splitTags(String(form.get("tags") ?? "")),
+      externalVideoUrl: nullableFormValue(form, "externalVideoUrl"),
+      steps
     };
 
-    setProtocols((current) =>
-      editingProtocolId
-        ? current.map((protocol) => (protocol.id === editingProtocolId ? nextProtocol : protocol))
-        : [nextProtocol, ...current]
-    );
-    event.currentTarget.reset();
+    await apiRequest(editingProtocolId ? `/protocols/${editingProtocolId}` : "/protocols", session.token, {
+      method: editingProtocolId ? "PATCH" : "POST",
+      body: JSON.stringify(editingProtocolId ? withoutTeamId(body) : body)
+    });
+
+    formElement.reset();
     closeProtocolForm();
+    await loadWorkspace(session, activeTeamId);
   }
 
-  function startRun(protocolId: string) {
-    const protocol = protocols.find((item) => item.id === protocolId);
-    if (!protocol) return;
-
-    const run: ExperimentRun = {
-      id: makeId("run"),
-      protocolId: protocol.id,
-      operatorUserId: currentMember.id,
-      status: "IN_PROGRESS",
-      startedAt: nowText(),
-      steps: protocol.steps.map((step) => ({
-        ...step,
-        id: makeId("run-step")
-      }))
-    };
-
-    setRuns((current) => [run, ...current]);
+  async function startRun(protocolId: string) {
+    if (!session) return;
+    const payload = await apiRequest<{ run: ApiRecord }>("/runs", session.token, {
+      method: "POST",
+      body: JSON.stringify({ protocolId })
+    });
+    const run = mapRun(payload.run);
+    await loadWorkspace(session, activeTeamId);
     setSelectedRunId(run.id);
     setActiveTab("runs");
   }
 
-  function toggleRunStep(runId: string, stepId: string) {
-    setRuns((current) =>
-      current.map((run) =>
-        run.id === runId
-          ? {
-              ...run,
-              steps: run.steps.map((step) =>
-                step.id === stepId
-                  ? {
-                      ...step,
-                      completedAt: step.completedAt ? undefined : nowText()
-                    }
-                  : step
-              )
-            }
-          : run
-      )
+  async function toggleRunStep(runId: string, stepId: string) {
+    if (!session) return;
+    const run = runs.find((item) => item.id === runId);
+    const step = run?.steps.find((item) => item.id === stepId);
+    if (!run || !step) return;
+    await apiRequest(`/runs/${runId}/steps/${stepId}`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({ completed: !step.completedAt, notes: step.notes ?? null })
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function finishRun(resultStatus: RunResult) {
+    if (!session || !selectedRun) return;
+    if (resultStatus === "FAILED" && !failureDraft.failureReason.trim()) return;
+    await apiRequest(`/runs/${selectedRun.id}/finish`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        resultStatus,
+        failureReason: resultStatus === "FAILED" ? failureDraft.failureReason : null,
+        failureStepId: resultStatus === "FAILED" ? failureDraft.failureStepId || null : null,
+        failureNotes: resultStatus === "FAILED" ? failureDraft.failureNotes : null
+      })
+    });
+    setFailureDraft({ failureReason: "", failureStepId: "", failureNotes: "" });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  if (!session) {
+    return (
+      <AuthView
+        mode={authMode}
+        inviteToken={inviteToken}
+        loading={loading}
+        errorMessage={errorMessage}
+        onModeChange={setAuthMode}
+        onInviteTokenChange={setInviteToken}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+      />
     );
   }
 
-  function finishRun(resultStatus: RunResult) {
-    if (!selectedRun) return;
-    if (resultStatus === "FAILED" && !failureDraft.failureReason.trim()) return;
-
-    setRuns((current) =>
-      current.map((run) =>
-        run.id === selectedRun.id
-          ? {
-              ...run,
-              status: resultStatus === "ABORTED" ? "ABORTED" : "COMPLETED",
-              resultStatus,
-              failureReason: resultStatus === "FAILED" ? failureDraft.failureReason : undefined,
-              failureStepId: resultStatus === "FAILED" ? failureDraft.failureStepId : undefined,
-              failureNotes: resultStatus === "FAILED" ? failureDraft.failureNotes : undefined,
-              completedAt: nowText()
-            }
-          : run
-      )
+  if (!activeTeamId) {
+    return (
+      <TeamOnboarding
+        user={session.user}
+        loading={loading}
+        errorMessage={errorMessage}
+        onCreateTeam={createTeam}
+        onJoinTeam={joinTeam}
+        onLogout={logout}
+      />
     );
-
-    setFailureDraft({ failureReason: "", failureStepId: "", failureNotes: "" });
   }
 
   return (
@@ -693,13 +1098,14 @@ function App() {
           </div>
           <div>
             <strong>实验室管理系统</strong>
-            <span>LabFlow MVP</span>
+            <span>{activeTeam?.name ?? "LabFlow"}</span>
           </div>
         </div>
 
         <nav className="nav-list" aria-label="主导航">
           <NavButton icon={<ClipboardCheck />} label="工作台" tab="dashboard" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<Package />} label="药品管理" tab="inventory" activeTab={activeTab} onClick={setActiveTab} />
+          <NavButton icon={<ShoppingCart />} label="药品订购" tab="orders" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<FlaskConical />} label="实验模板" tab="protocols" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<CheckCircle2 />} label="执行记录" tab="runs" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<Users />} label="团队权限" tab="team" activeTab={activeTab} onClick={setActiveTab} />
@@ -709,33 +1115,32 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">分子诊断实验室</p>
+            <p className="eyebrow">{activeTeam?.name ?? "实验室团队"}</p>
             <h1>{titleForTab(activeTab)}</h1>
           </div>
           <div className="topbar-actions">
             <label className="user-switch">
-              <span>当前身份</span>
-              <select value={currentUserId} onChange={(event) => setCurrentUserId(event.target.value)}>
-                {members.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name} / {roleText[member.role]}
-                  </option>
+              <span>当前团队</span>
+              <select value={activeTeamId} onChange={(event) => void handleTeamChange(event.target.value)}>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>{team.name}</option>
                 ))}
               </select>
             </label>
+            <div className="signed-user">
+              <strong>{session.user.name}</strong>
+              <span>{session.user.email}</span>
+            </div>
             <RoleBadge role={currentMember.role} />
+            <button className="secondary-button" type="button" onClick={logout}>退出</button>
           </div>
         </header>
 
+        {errorMessage && <Notice icon={<AlertTriangle />} text={errorMessage} />}
+        {loading && <Notice icon={<RefreshCcw />} text="正在同步服务器数据..." />}
+
         {activeTab === "dashboard" && (
-          <Dashboard
-            stats={stats}
-            events={events}
-            inventory={inventory}
-            protocols={protocols}
-            runs={visibleRuns}
-            onOpenTab={setActiveTab}
-          />
+          <Dashboard stats={stats} events={events} inventory={inventory} protocols={protocols} runs={runs} onOpenTab={setActiveTab} />
         )}
 
         {activeTab === "inventory" && (
@@ -745,14 +1150,20 @@ function App() {
             onQueryChange={setInventoryQuery}
             items={filteredInventory}
             events={events}
-            orders={orders}
-            members={members}
-            currentMember={currentMember}
             showForm={showInventoryForm}
             onShowForm={setShowInventoryForm}
             onAddInventory={addInventoryItem}
             onAdjustStock={adjustStock}
+          />
+        )}
+
+        {activeTab === "orders" && (
+          <OrdersView
+            canManageContent={canManageContent}
+            orders={orders}
+            currentMember={currentMember}
             onAddOrderRequest={addOrderRequest}
+            onUpdateOrderStatus={updateOrderStatus}
           />
         )}
 
@@ -781,7 +1192,7 @@ function App() {
           <RunsView
             members={members}
             protocols={protocols}
-            runs={visibleRuns}
+            runs={runs}
             selectedRun={selectedRun}
             selectedRunId={selectedVisibleRunId}
             currentMember={currentMember}
@@ -800,6 +1211,9 @@ function App() {
             members={members}
             currentMember={currentMember}
             isOwner={isOwner}
+            canInvite={canManageContent}
+            inviteLink={inviteLink}
+            onCreateInvite={createInvite}
             onChangeRole={changeMemberRole}
             onToggleRunVisibility={toggleRunVisibility}
           />
@@ -809,10 +1223,137 @@ function App() {
   );
 }
 
+function AuthView({
+  mode,
+  inviteToken,
+  loading,
+  errorMessage,
+  onModeChange,
+  onInviteTokenChange,
+  onLogin,
+  onRegister
+}: {
+  mode: "login" | "register";
+  inviteToken: string;
+  loading: boolean;
+  errorMessage: string;
+  onModeChange: (mode: "login" | "register") => void;
+  onInviteTokenChange: (value: string) => void;
+  onLogin: (event: FormEvent<HTMLFormElement>) => void;
+  onRegister: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="brand auth-brand">
+          <div className="brand-mark">
+            <FlaskConical size={22} />
+          </div>
+          <div>
+            <strong>实验室管理系统</strong>
+            <span>真实团队数据 · MySQL 持久化</span>
+          </div>
+        </div>
+        <div className="auth-tabs">
+          <button className={mode === "login" ? "active" : ""} onClick={() => onModeChange("login")}>登录</button>
+          <button className={mode === "register" ? "active" : ""} onClick={() => onModeChange("register")}>注册</button>
+        </div>
+        {errorMessage && <Notice icon={<AlertTriangle />} text={errorMessage} />}
+
+        {mode === "login" ? (
+          <form className="auth-form" onSubmit={onLogin}>
+            <label>
+              邮箱
+              <input name="email" type="email" autoComplete="email" required />
+            </label>
+            <label>
+              密码
+              <input name="password" type="password" autoComplete="current-password" required />
+            </label>
+            <label>
+              团队邀请链接或 token
+              <input name="inviteToken" value={inviteToken} onChange={(event) => onInviteTokenChange(event.target.value)} placeholder="可选，收到邀请时填写" />
+            </label>
+            <button className="primary-button full-width" disabled={loading} type="submit">登录并进入系统</button>
+          </form>
+        ) : (
+          <form className="auth-form" onSubmit={onRegister}>
+            <label>
+              姓名
+              <input name="name" autoComplete="name" required />
+            </label>
+            <label>
+              邮箱
+              <input name="email" type="email" autoComplete="email" required />
+            </label>
+            <label>
+              密码
+              <input name="password" type="password" minLength={8} autoComplete="new-password" required />
+            </label>
+            <label>
+              创建新实验室团队
+              <input name="teamName" placeholder="例如 分子诊断实验室；加入别人团队时可不填" />
+            </label>
+            <label>
+              团队邀请链接或 token
+              <input name="inviteToken" value={inviteToken} onChange={(event) => onInviteTokenChange(event.target.value)} placeholder="收到邀请时填写" />
+            </label>
+            <button className="primary-button full-width" disabled={loading} type="submit">注册</button>
+          </form>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function TeamOnboarding({
+  user,
+  loading,
+  errorMessage,
+  onCreateTeam,
+  onJoinTeam,
+  onLogout
+}: {
+  user: User;
+  loading: boolean;
+  errorMessage: string;
+  onCreateTeam: (event: FormEvent<HTMLFormElement>) => void;
+  onJoinTeam: (event: FormEvent<HTMLFormElement>) => void;
+  onLogout: () => void;
+}) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel onboarding-panel">
+        <div>
+          <p className="eyebrow">已登录：{user.name}</p>
+          <h1>创建或加入一个实验室团队</h1>
+        </div>
+        {errorMessage && <Notice icon={<AlertTriangle />} text={errorMessage} />}
+        <form className="auth-form" onSubmit={onCreateTeam}>
+          <label>
+            新团队名称
+            <input name="name" placeholder="例如 分子诊断实验室" required />
+          </label>
+          <button className="primary-button" disabled={loading} type="submit">创建团队并成为群主</button>
+        </form>
+        <form className="auth-form" onSubmit={onJoinTeam}>
+          <label>
+            邀请链接或 token
+            <input name="token" placeholder="由群主或管理员生成" required />
+          </label>
+          <button className="secondary-button" disabled={loading} type="submit">加入已有团队</button>
+        </form>
+        <button className="text-button" onClick={onLogout}>退出登录</button>
+      </section>
+    </main>
+  );
+}
+
 function titleForTab(tab: TabKey) {
   const titles: Record<TabKey, string> = {
     dashboard: "今日工作台",
     inventory: "药品管理",
+    orders: "药品订购",
     protocols: "实验模板",
     runs: "实验执行记录",
     team: "团队权限"
@@ -956,28 +1497,20 @@ function InventoryView({
   onQueryChange,
   items,
   events,
-  orders,
-  members,
-  currentMember,
   showForm,
   onShowForm,
   onAddInventory,
-  onAdjustStock,
-  onAddOrderRequest
+  onAdjustStock
 }: {
   canManageContent: boolean;
   query: string;
   onQueryChange: (value: string) => void;
   items: InventoryItem[];
   events: InventoryEvent[];
-  orders: PurchaseOrder[];
-  members: Member[];
-  currentMember: Member;
   showForm: boolean;
   onShowForm: (value: boolean) => void;
   onAddInventory: (event: FormEvent<HTMLFormElement>) => void;
   onAdjustStock: (itemId: string, type: InventoryEvent["type"], delta: number, reason: string) => void;
-  onAddOrderRequest: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <div className="page-grid">
@@ -1072,64 +1605,6 @@ function InventoryView({
         </section>
       )}
 
-      <section className="panel order-panel">
-        <SectionHeader icon={<ShoppingCart />} title="药品订购表" />
-        <form className="order-form" onSubmit={onAddOrderRequest}>
-          <label>
-            药品名称
-            <input name="chemicalName" placeholder="例如 Tris-HCl 缓冲液" required />
-          </label>
-          <label>
-            规格/浓度
-            <input name="specification" placeholder="1M, pH 8.0, 500mL" required />
-          </label>
-          <label>
-            供应商
-            <input name="supplier" placeholder="可选" />
-          </label>
-          <label>
-            数量
-            <input name="quantity" type="number" min="1" step="1" defaultValue="1" required />
-          </label>
-          <label>
-            单位
-            <input name="unit" defaultValue="瓶" required />
-          </label>
-          <label className="wide">
-            备注
-            <input name="note" placeholder={`${currentMember.name} 发起订购申请，可填写用途或紧急程度`} />
-          </label>
-          <div className="form-actions wide">
-            <button className="primary-button" type="submit">
-              <Plus size={18} />
-              加入订购表
-            </button>
-          </div>
-        </form>
-
-        <div className="order-table">
-          {orders.map((order) => {
-            const requester = members.find((member) => member.id === order.requesterUserId);
-            return (
-              <div className="order-row" key={order.id}>
-                <div>
-                  <strong>{order.chemicalName}</strong>
-                  <span>{order.specification}</span>
-                </div>
-                <span>{order.supplier || "未填写供应商"}</span>
-                <strong>
-                  {order.quantity}
-                  {order.unit}
-                </strong>
-                <span>{requester?.name ?? "未知成员"} · {order.requestedAt}</span>
-                <span className={`order-status order-${order.status.toLowerCase()}`}>{orderStatusText[order.status]}</span>
-                {order.note && <small>{order.note}</small>}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
       <section className="inventory-layout">
         <div className="inventory-list">
           {items.map((item) => (
@@ -1193,6 +1668,101 @@ function InventoryView({
             ))}
           </div>
         </aside>
+      </section>
+    </div>
+  );
+}
+
+function OrdersView({
+  canManageContent,
+  orders,
+  currentMember,
+  onAddOrderRequest,
+  onUpdateOrderStatus
+}: {
+  canManageContent: boolean;
+  orders: PurchaseOrder[];
+  currentMember: Member;
+  onAddOrderRequest: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
+}) {
+  return (
+    <div className="page-grid">
+      <Toolbar
+        icon={<ShoppingCart />}
+        title="药品订购表"
+        searchValue=""
+        searchPlaceholder="订购表下方展示全部记录"
+        onSearchChange={() => undefined}
+        action={<span className="limit-pill">{orders.length} 条</span>}
+      />
+
+      <section className="panel order-panel">
+        <SectionHeader icon={<Plus />} title="新增订购记录" />
+        <form className="order-form" onSubmit={onAddOrderRequest}>
+          <label>
+            药品名称
+            <input name="chemicalName" placeholder="例如 Tris-HCl 缓冲液" required />
+          </label>
+          <label>
+            规格/浓度
+            <input name="specification" placeholder="1M, pH 8.0, 500mL" required />
+          </label>
+          <label>
+            供应商
+            <input name="supplier" placeholder="例如 Solarbio、国药、Merck" />
+          </label>
+          <label>
+            数量
+            <input name="quantity" type="number" min="1" step="1" defaultValue="1" required />
+          </label>
+          <label>
+            单位
+            <input name="unit" defaultValue="瓶" required />
+          </label>
+          <label className="wide">
+            备注
+            <input name="note" placeholder={`${currentMember.name} 发起订购，可填写用途、货号、预算或紧急程度`} />
+          </label>
+          <div className="form-actions wide">
+            <button className="primary-button" type="submit">
+              <Plus size={18} />
+              加入订购表
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel order-panel">
+        <SectionHeader icon={<ShoppingCart />} title="已记录的订购药品" />
+        <div className="order-table">
+          {orders.map((order) => (
+            <div className="order-row" key={order.id}>
+              <div>
+                <strong>{order.chemicalName}</strong>
+                <span>{order.specification}</span>
+                {order.note && <small>{order.note}</small>}
+              </div>
+              <span>{order.supplier || "未填写供应商"}</span>
+              <strong>
+                {order.quantity}
+                {order.unit}
+              </strong>
+              <span>{order.requesterName ?? "未知成员"} · {order.requestedAt}</span>
+              {canManageContent ? (
+                <select value={order.status} onChange={(event) => onUpdateOrderStatus(order.id, event.target.value as OrderStatus)}>
+                  <option value="PENDING">待订购</option>
+                  <option value="ORDERED">已下单</option>
+                  <option value="ARRIVED">已到货</option>
+                  <option value="CANCELED">已取消</option>
+                </select>
+              ) : (
+                <span className={`order-status order-${order.status.toLowerCase()}`}>{orderStatusText[order.status]}</span>
+              )}
+            </div>
+          ))}
+          {orders.length === 0 && <EmptyState icon={<ShoppingCart />} text="还没有药品订购记录" />}
+        </div>
       </section>
     </div>
   );
@@ -1563,12 +2133,18 @@ function TeamView({
   members,
   currentMember,
   isOwner,
+  canInvite,
+  inviteLink,
+  onCreateInvite,
   onChangeRole,
   onToggleRunVisibility
 }: {
   members: Member[];
   currentMember: Member;
   isOwner: boolean;
+  canInvite: boolean;
+  inviteLink: string;
+  onCreateInvite: () => void;
   onChangeRole: (userId: string, role: "ADMIN" | "MEMBER") => void;
   onToggleRunVisibility: (userId: string) => void;
 }) {
@@ -1586,6 +2162,18 @@ function TeamView({
           <Permission label="修改库存" allowed={canManage(currentMember.role)} />
           <Permission label="使用实验模板" allowed />
           <Permission label="查看全部执行记录" allowed={canViewAllRunRecords(currentMember)} />
+        </div>
+      </section>
+
+      <section className="panel invite-panel">
+        <SectionHeader icon={<Users />} title="邀请真实成员加入" />
+        <p>群主或管理员可以生成邀请链接。对方打开链接后注册/登录，即可加入当前实验室团队。</p>
+        <div className="invite-row">
+          <button className="primary-button" disabled={!canInvite} onClick={onCreateInvite}>
+            <Plus size={18} />
+            生成邀请链接
+          </button>
+          {inviteLink && <input value={inviteLink} readOnly onFocus={(event) => event.currentTarget.select()} />}
         </div>
       </section>
 

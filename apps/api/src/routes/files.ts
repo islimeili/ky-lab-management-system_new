@@ -19,7 +19,21 @@ function isChemicalImage(kind: string) {
 }
 
 export async function fileRoutes(app: FastifyInstance) {
-  app.addHook("onRequest", app.authenticate);
+  app.addHook("onRequest", async (request, reply) => {
+    const query = request.query as { token?: string } | undefined;
+
+    if (query?.token && !request.headers.authorization) {
+      try {
+        request.user = app.jwt.verify(query.token) as { sub: string };
+        return;
+      } catch {
+        await reply.code(401).send({ message: "请先登录" });
+        return;
+      }
+    }
+
+    await app.authenticate(request, reply);
+  });
 
   app.get("/files/policy", async (request, reply) => {
     const query = z.object({

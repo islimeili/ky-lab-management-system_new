@@ -109,7 +109,7 @@ export async function teamRoutes(app: FastifyInstance) {
     const params = z.object({ token: z.string() }).parse(request.params);
     const invite = await app.prisma.teamInvite.findUnique({ where: { token: params.token } });
 
-    if (!invite || invite.usedAt || invite.expiresAt < new Date()) {
+    if (!invite || invite.expiresAt < new Date()) {
       await reply.code(404).send({ message: "邀请链接无效或已过期" });
       return;
     }
@@ -122,11 +122,6 @@ export async function teamRoutes(app: FastifyInstance) {
         userId: request.user.sub,
         role: "MEMBER"
       }
-    });
-
-    await app.prisma.teamInvite.update({
-      where: { id: invite.id },
-      data: { usedAt: new Date() }
     });
 
     await writeAudit(app, {
