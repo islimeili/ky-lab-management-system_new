@@ -178,180 +178,6 @@ const orderStatusText: Record<OrderStatus, string> = {
   CANCELED: "已取消"
 };
 
-/*
-const initialMembers: Member[] = [
-  {
-    id: "u-owner",
-    name: "陈老师",
-    email: "owner@lab.local",
-    role: "OWNER",
-    canViewAllRuns: true,
-    joinedAt: "2026-06-01"
-  },
-  {
-    id: "u-admin",
-    name: "林博士",
-    email: "admin@lab.local",
-    role: "ADMIN",
-    canViewAllRuns: false,
-    joinedAt: "2026-06-03"
-  },
-  {
-    id: "u-member",
-    name: "周同学",
-    email: "member@lab.local",
-    role: "MEMBER",
-    canViewAllRuns: false,
-    joinedAt: "2026-06-08"
-  }
-];
-
-const initialInventory: InventoryItem[] = [
-  {
-    id: "chem-1",
-    name: "乙腈",
-    alias: "ACN",
-    casNumber: "75-05-8",
-    specification: "HPLC grade, 4L",
-    supplier: "Merck",
-    catalogNumber: "100030",
-    batchNumber: "B2406A",
-    quantity: 6,
-    unit: "瓶",
-    location: "有机试剂柜 A-02",
-    expiresAt: "2027-02-15",
-    status: "ACTIVE",
-    hazardTags: ["易燃", "有毒"],
-    notes: "开封后优先用于色谱流动相。",
-    imageUrl: "https://images.unsplash.com/photo-1581093458791-9d09b4f0c4fa?auto=format&fit=crop&w=640&q=80",
-    updatedAt: "2026-06-10 09:30"
-  },
-  {
-    id: "chem-2",
-    name: "Tris-HCl 缓冲液",
-    alias: "Tris buffer",
-    specification: "1M, pH 8.0, 500mL",
-    supplier: "Solarbio",
-    catalogNumber: "T1080",
-    batchNumber: "TB0426",
-    quantity: 2,
-    unit: "瓶",
-    location: "4°C 冰箱 B 层",
-    expiresAt: "2026-08-20",
-    status: "LOW_STOCK",
-    hazardTags: ["低库存"],
-    imageUrl: "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=640&q=80",
-    updatedAt: "2026-06-09 17:12"
-  },
-  {
-    id: "chem-3",
-    name: "氯化钠",
-    alias: "NaCl",
-    casNumber: "7647-14-5",
-    specification: "AR, 500g",
-    supplier: "国药",
-    batchNumber: "NACL2601",
-    quantity: 11,
-    unit: "瓶",
-    location: "常温试剂柜 C-11",
-    expiresAt: "2028-01-31",
-    status: "ACTIVE",
-    hazardTags: ["常规"],
-    imageUrl: "https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&w=640&q=80",
-    updatedAt: "2026-06-10 12:05"
-  }
-];
-
-const initialEvents: InventoryEvent[] = [
-  {
-    id: "evt-1",
-    itemId: "chem-1",
-    itemName: "乙腈",
-    type: "CONSUME",
-    before: 7,
-    delta: -1,
-    after: 6,
-    reason: "LC-MS 流动相",
-    userName: "林博士",
-    createdAt: "2026-06-10 09:30"
-  },
-  {
-    id: "evt-2",
-    itemId: "chem-2",
-    itemName: "Tris-HCl 缓冲液",
-    type: "RESTOCK",
-    before: 1,
-    delta: 1,
-    after: 2,
-    reason: "补充库存",
-    userName: "陈老师",
-    createdAt: "2026-06-09 17:12"
-  }
-];
-
-const initialOrders: PurchaseOrder[] = [
-  {
-    id: "order-1",
-    chemicalName: "Tris-HCl 缓冲液",
-    specification: "1M, pH 8.0, 500mL",
-    supplier: "Solarbio",
-    quantity: 4,
-    unit: "瓶",
-    requesterUserId: "u-admin",
-    requestedAt: "2026-06-10 10:18",
-    status: "PENDING",
-    note: "低库存，优先补充细胞实验常用缓冲液。"
-  }
-];
-
-const initialProtocols: Protocol[] = [
-  {
-    id: "protocol-1",
-    title: "SDS-PAGE 蛋白电泳",
-    description: "样品制备、上样、电泳、染色和脱色记录。",
-    tags: ["蛋白", "电泳"],
-    externalVideoUrl: "https://example.com/sds-page-reference",
-    createdByUserId: "u-admin",
-    updatedAt: "2026-06-08 14:22",
-    steps: [
-      { id: "p1-s1", title: "配制凝胶", description: "确认分离胶和浓缩胶比例，记录批号。" },
-      { id: "p1-s2", title: "样品变性", description: "加入 loading buffer，95°C 加热 5 分钟。" },
-      { id: "p1-s3", title: "上样与电泳", description: "按样品编号上样，80V 起跑后切换至 120V。" },
-      { id: "p1-s4", title: "染色与脱色", description: "拍照保存原始胶图。" }
-    ]
-  },
-  {
-    id: "protocol-2",
-    title: "细胞传代",
-    description: "贴壁细胞消化、离心、重悬和接种流程。",
-    tags: ["细胞", "培养"],
-    createdByUserId: "u-owner",
-    updatedAt: "2026-06-06 10:10",
-    steps: [
-      { id: "p2-s1", title: "观察细胞状态", description: "记录汇合度、污染和培养基颜色。" },
-      { id: "p2-s2", title: "PBS 清洗", description: "弃培养基，PBS 轻柔清洗一次。" },
-      { id: "p2-s3", title: "胰酶消化", description: "显微镜下确认细胞变圆后终止消化。" },
-      { id: "p2-s4", title: "计数并接种", description: "记录接种密度和培养瓶编号。" }
-    ]
-  }
-];
-
-const initialRuns: ExperimentRun[] = [
-  {
-    id: "run-1",
-    protocolId: "protocol-1",
-    operatorUserId: "u-member",
-    status: "IN_PROGRESS",
-    startedAt: "2026-06-10 13:20",
-    steps: [
-      { id: "r1-s1", title: "配制凝胶", description: "确认分离胶和浓缩胶比例，记录批号。", completedAt: "2026-06-10 13:31" },
-      { id: "r1-s2", title: "样品变性", description: "加入 loading buffer，95°C 加热 5 分钟。" },
-      { id: "r1-s3", title: "上样与电泳", description: "按样品编号上样，80V 起跑后切换至 120V。" },
-      { id: "r1-s4", title: "染色与脱色", description: "拍照保存原始胶图。" }
-    ]
-  }
-];
-*/
 
 function makeId(prefix: string) {
   const randomValue =
@@ -622,6 +448,7 @@ function App() {
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [runs, setRuns] = useState<ExperimentRun[]>([]);
   const [inventoryQuery, setInventoryQuery] = useState("");
+  const [orderQuery, setOrderQuery] = useState("");
   const [protocolQuery, setProtocolQuery] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [showInventoryForm, setShowInventoryForm] = useState(false);
@@ -687,6 +514,11 @@ function App() {
   const filteredProtocols = protocols.filter((protocol) => {
     const text = `${protocol.title} ${protocol.description} ${protocol.tags.join(" ")}`.toLowerCase();
     return text.includes(protocolQuery.toLowerCase());
+  });
+
+  const filteredOrders = orders.filter((order) => {
+    const text = `${order.chemicalName} ${order.specification} ${order.supplier ?? ""} ${order.requesterName ?? ""} ${order.note ?? ""}`.toLowerCase();
+    return text.includes(orderQuery.toLowerCase());
   });
 
   async function loadWorkspace(nextSession = session, requestedTeamId = activeTeamId) {
@@ -1160,7 +992,10 @@ function App() {
         {activeTab === "orders" && (
           <OrdersView
             canManageContent={canManageContent}
-            orders={orders}
+            orders={filteredOrders}
+            totalOrderCount={orders.length}
+            query={orderQuery}
+            onQueryChange={setOrderQuery}
             currentMember={currentMember}
             onAddOrderRequest={addOrderRequest}
             onUpdateOrderStatus={updateOrderStatus}
@@ -1676,12 +1511,18 @@ function InventoryView({
 function OrdersView({
   canManageContent,
   orders,
+  totalOrderCount,
+  query,
+  onQueryChange,
   currentMember,
   onAddOrderRequest,
   onUpdateOrderStatus
 }: {
   canManageContent: boolean;
   orders: PurchaseOrder[];
+  totalOrderCount: number;
+  query: string;
+  onQueryChange: (value: string) => void;
   currentMember: Member;
   onAddOrderRequest: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
@@ -1691,10 +1532,10 @@ function OrdersView({
       <Toolbar
         icon={<ShoppingCart />}
         title="药品订购表"
-        searchValue=""
-        searchPlaceholder="订购表下方展示全部记录"
-        onSearchChange={() => undefined}
-        action={<span className="limit-pill">{orders.length} 条</span>}
+        searchValue={query}
+        searchPlaceholder="搜索药品、供应商、备注或发起人"
+        onSearchChange={onQueryChange}
+        action={<span className="limit-pill">{orders.length}/{totalOrderCount} 条</span>}
       />
 
       <section className="panel order-panel">
@@ -1761,7 +1602,12 @@ function OrdersView({
               )}
             </div>
           ))}
-          {orders.length === 0 && <EmptyState icon={<ShoppingCart />} text="还没有药品订购记录" />}
+          {orders.length === 0 && (
+            <EmptyState
+              icon={<ShoppingCart />}
+              text={totalOrderCount === 0 ? "还没有药品订购记录" : "没有匹配的订购记录"}
+            />
+          )}
         </div>
       </section>
     </div>
