@@ -338,6 +338,15 @@ function nowText() {
   });
 }
 
+function makeId(prefix: string) {
+  const randomValue =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+  return `${prefix}-${randomValue}`;
+}
+
 function canManage(role: Role) {
   return role === "OWNER" || role === "ADMIN";
 }
@@ -423,7 +432,7 @@ function App() {
 
   function openNewProtocolForm() {
     setEditingProtocolId(null);
-    setProtocolStepDrafts([{ id: `draft-${crypto.randomUUID()}`, title: "", description: "" }]);
+    setProtocolStepDrafts([{ id: makeId("draft"), title: "", description: "" }]);
     setShowProtocolForm(true);
   }
 
@@ -434,7 +443,7 @@ function App() {
     setEditingProtocolId(protocol.id);
     setProtocolStepDrafts(
       protocol.steps.map((step) => ({
-        id: `draft-${crypto.randomUUID()}`,
+        id: makeId("draft"),
         title: step.title,
         description: step.description ?? ""
       }))
@@ -444,7 +453,7 @@ function App() {
 
   function closeProtocolForm() {
     setEditingProtocolId(null);
-    setProtocolStepDrafts([{ id: `draft-${crypto.randomUUID()}`, title: "", description: "" }]);
+    setProtocolStepDrafts([{ id: makeId("draft"), title: "", description: "" }]);
     setShowProtocolForm(false);
   }
 
@@ -466,7 +475,7 @@ function App() {
     if (!name) return;
 
     const item: InventoryItem = {
-      id: `chem-${crypto.randomUUID()}`,
+      id: makeId("chem"),
       name,
       alias: String(form.get("alias") ?? ""),
       casNumber: String(form.get("casNumber") ?? ""),
@@ -491,7 +500,7 @@ function App() {
     setInventory((current) => [item, ...current]);
     setEvents((current) => [
       {
-        id: `evt-${crypto.randomUUID()}`,
+        id: makeId("evt"),
         itemId: item.id,
         itemName: item.name,
         type: "INITIAL",
@@ -519,7 +528,7 @@ function App() {
 
         setEvents((existing) => [
           {
-            id: `evt-${crypto.randomUUID()}`,
+            id: makeId("evt"),
             itemId: item.id,
             itemName: item.name,
             type,
@@ -553,7 +562,7 @@ function App() {
     if (!chemicalName || quantity <= 0) return;
 
     const order: PurchaseOrder = {
-      id: `order-${crypto.randomUUID()}`,
+      id: makeId("order"),
       chemicalName,
       specification: String(form.get("specification") ?? ""),
       supplier: String(form.get("supplier") ?? ""),
@@ -585,7 +594,7 @@ function App() {
     if (!title || validSteps.length === 0) return;
 
     const nextProtocol: Protocol = {
-      id: editingProtocolId ?? `protocol-${crypto.randomUUID()}`,
+      id: editingProtocolId ?? makeId("protocol"),
       title,
       description: String(form.get("description") ?? ""),
       tags: String(form.get("tags") ?? "")
@@ -596,7 +605,7 @@ function App() {
       createdByUserId: editingProtocol?.createdByUserId ?? currentMember.id,
       updatedAt: nowText(),
       steps: validSteps.map((step) => ({
-        id: `step-${crypto.randomUUID()}`,
+        id: makeId("step"),
         title: step.title,
         description: step.description
       }))
@@ -616,14 +625,14 @@ function App() {
     if (!protocol) return;
 
     const run: ExperimentRun = {
-      id: `run-${crypto.randomUUID()}`,
+      id: makeId("run"),
       protocolId: protocol.id,
       operatorUserId: currentMember.id,
       status: "IN_PROGRESS",
       startedAt: nowText(),
       steps: protocol.steps.map((step) => ({
         ...step,
-        id: `run-step-${crypto.randomUUID()}`
+        id: makeId("run-step")
       }))
     };
 
@@ -1229,7 +1238,7 @@ function ProtocolsView({
   }
 
   function addStepDraft() {
-    onStepDraftsChange([...stepDrafts, { id: `draft-${crypto.randomUUID()}`, title: "", description: "" }]);
+    onStepDraftsChange([...stepDrafts, { id: makeId("draft"), title: "", description: "" }]);
   }
 
   function removeStepDraft(stepId: string) {
