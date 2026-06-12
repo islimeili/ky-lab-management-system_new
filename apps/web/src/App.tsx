@@ -17,6 +17,7 @@ import {
   Search,
   ShieldCheck,
   ShoppingCart,
+  Trash2,
   Upload,
   Users,
   Video,
@@ -79,6 +80,7 @@ type InventoryItem = {
   hazardTags: string[];
   notes?: string;
   imageUrl?: string;
+  imageUrls: string[];
   updatedAt: string;
 };
 
@@ -100,6 +102,7 @@ type PurchaseOrder = {
   chemicalName: string;
   specification: string;
   supplier?: string;
+  catalogNumber?: string;
   quantity: number;
   unit: string;
   requesterUserId: string;
@@ -193,7 +196,7 @@ function canManage(role: Role) {
 }
 
 function canViewAllRunRecords(member: Member) {
-  return member.role === "OWNER" || member.canViewAllRuns;
+  return member.role === "OWNER" || member.role === "ADMIN" || member.canViewAllRuns;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -298,6 +301,14 @@ function mapMember(membership: ApiRecord): Member {
 function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
   const tags = Array.isArray(item.hazardTags) ? item.hazardTags.map(String) : [];
   const imageFile = asRecord(item.imageFile);
+  const imageUrls = Array.isArray(item.imageFiles)
+    ? item.imageFiles
+        .map((file) => tokenizedFileUrl(optionalString(asRecord(file).publicUrl), token))
+        .filter((url): url is string => Boolean(url))
+    : [];
+  const legacyImageUrl = tokenizedFileUrl(optionalString(imageFile.publicUrl), token);
+  const allImageUrls = Array.from(new Set([...(legacyImageUrl ? [legacyImageUrl] : []), ...imageUrls]));
+
   return {
     id: stringValue(item.id),
     name: stringValue(item.name),
@@ -314,7 +325,8 @@ function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
     status: item.status as InventoryStatus,
     hazardTags: tags,
     notes: optionalString(item.notes),
-    imageUrl: tokenizedFileUrl(optionalString(imageFile.publicUrl), token),
+    imageUrl: allImageUrls[0],
+    imageUrls: allImageUrls,
     updatedAt: displayDate(stringValue(item.updatedAt))
   };
 }
@@ -343,6 +355,7 @@ function mapOrder(order: ApiRecord): PurchaseOrder {
     chemicalName: stringValue(order.chemicalName),
     specification: stringValue(order.specification),
     supplier: optionalString(order.supplier),
+    catalogNumber: optionalString(order.catalogNumber),
     quantity: Number(order.quantity ?? 0),
     unit: stringValue(order.unit),
     requesterUserId: stringValue(order.requestedByUserId),
@@ -450,6 +463,7 @@ function App() {
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [orderQuery, setOrderQuery] = useState("");
   const [protocolQuery, setProtocolQuery] = useState("");
+  const [protocolTagFilter, setProtocolTagFilter] = useState("全部");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [showInventoryForm, setShowInventoryForm] = useState(false);
   const [showProtocolForm, setShowProtocolForm] = useState(false);
@@ -511,13 +525,20 @@ function App() {
     return text.includes(inventoryQuery.toLowerCase());
   });
 
+  const protocolTags = useMemo(
+    () => ["全部", ...Array.from(new Set(protocols.flatMap((protocol) => protocol.tags))).filter(Boolean)],
+    [protocols]
+  );
+
   const filteredProtocols = protocols.filter((protocol) => {
     const text = `${protocol.title} ${protocol.description} ${protocol.tags.join(" ")}`.toLowerCase();
-    return text.includes(protocolQuery.toLowerCase());
+    const matchesSearch = text.includes(protocolQuery.toLowerCase());
+    const matchesTag = protocolTagFilter === "全部" || protocol.tags.includes(protocolTagFilter);
+    return matchesSearch && matchesTag;
   });
 
   const filteredOrders = orders.filter((order) => {
-    const text = `${order.chemicalName} ${order.specification} ${order.supplier ?? ""} ${order.requesterName ?? ""} ${order.note ?? ""}`.toLowerCase();
+    const text = `${order.chemicalName} ${order.specification} ${order.supplier ?? ""} ${order.catalogNumber ?? ""} ${order.requesterName ?? ""} ${order.note ?? ""}`.toLowerCase();
     return text.includes(orderQuery.toLowerCase());
   });
 
@@ -702,6 +723,39 @@ function App() {
     await loadWorkspace(session, activeTeamId);
   }
 
+  async function updateMemberName(userId: string, currentName: string) {
+    if (!session || !activeTeamId || !canManageContent) return;
+    const name = window.prompt("请输入新的成员姓名", currentName)?.trim();
+    if (!name || name === currentName) return;
+
+    await apiRequest(`/teams/${activeTeamId}/members/${userId}/name`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({ name })
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function removeMember(userId: string, memberName: string) {
+    if (!session || !activeTeamId || !canManageContent) return;
+    if (!window.confirm(`确定要将 ${memberName} 移出当前团队吗？`)) return;
+
+    await apiRequest(`/teams/${activeTeamId}/members/${userId}`, session.token, {
+      method: "DELETE"
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function transferOwner(userId: string, memberName: string) {
+    if (!session || !activeTeamId || !isOwner) return;
+    if (!window.confirm(`确定要把群主转让给 ${memberName} 吗？转让后你会变为管理员。`)) return;
+
+    await apiRequest(`/teams/${activeTeamId}/owner`, session.token, {
+      method: "PATCH",
+      body: JSON.stringify({ userId })
+    });
+    await loadWorkspace(session, activeTeamId);
+  }
+
   async function createInvite() {
     if (!session || !activeTeamId || !canManageContent) return;
     const payload = await apiRequest<{ invite: { token: string } }>(`/teams/${activeTeamId}/invites`, session.token, {
@@ -745,17 +799,17 @@ function App() {
     if (!session || !activeTeamId || !canManageContent) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const image = form.get("image") as File | null;
+    const images = form.getAll("images").filter((value): value is File => value instanceof File && value.size > 0);
 
-    let imageFileId: string | undefined;
-    if (image && image.size > 0) {
+    const imageFileIds: string[] = [];
+    for (const image of images) {
       const fileForm = new FormData();
       fileForm.set("file", image);
       const filePayload = await apiRequest<{ file: { id: string } }>(`/files?teamId=${activeTeamId}&kind=CHEMICAL_IMAGE`, session.token, {
         method: "POST",
         body: fileForm
       });
-      imageFileId = filePayload.file.id;
+      imageFileIds.push(filePayload.file.id);
     }
 
     await apiRequest("/inventory", session.token, {
@@ -775,7 +829,8 @@ function App() {
         expiresAt: nullableFormValue(form, "expiresAt"),
         hazardTags: splitTags(String(form.get("hazardTags") ?? "")),
         notes: nullableFormValue(form, "notes"),
-        imageFileId
+        imageFileId: imageFileIds[0],
+        imageFileIds
       })
     });
 
@@ -805,6 +860,7 @@ function App() {
         chemicalName: String(form.get("chemicalName") ?? "").trim(),
         specification: nullableFormValue(form, "specification"),
         supplier: nullableFormValue(form, "supplier"),
+        catalogNumber: nullableFormValue(form, "catalogNumber"),
         quantity: Number(form.get("quantity") ?? 0),
         unit: String(form.get("unit") ?? "瓶"),
         note: nullableFormValue(form, "note")
@@ -863,6 +919,16 @@ function App() {
     await loadWorkspace(session, activeTeamId);
     setSelectedRunId(run.id);
     setActiveTab("runs");
+  }
+
+  async function deleteRun(runId: string) {
+    if (!session) return;
+    const run = runs.find((item) => item.id === runId);
+    if (!run || run.operatorUserId !== session.user.id) return;
+    if (!window.confirm("确定删除这条实验记录吗？删除后无法恢复。")) return;
+
+    await apiRequest(`/runs/${runId}`, session.token, { method: "DELETE" });
+    await loadWorkspace(session, activeTeamId);
   }
 
   async function toggleRunStep(runId: string, stepId: string) {
@@ -1008,8 +1074,11 @@ function App() {
             currentMember={currentMember}
             members={members}
             protocols={filteredProtocols}
+            allTags={protocolTags}
+            activeTag={protocolTagFilter}
             query={protocolQuery}
             onQueryChange={setProtocolQuery}
+            onTagChange={setProtocolTagFilter}
             showForm={showProtocolForm}
             editingProtocol={editingProtocol}
             onStartNewProtocol={openNewProtocolForm}
@@ -1035,6 +1104,7 @@ function App() {
             onSelectRun={setSelectedRunId}
             onToggleStep={toggleRunStep}
             onFinishRun={finishRun}
+            onDeleteRun={deleteRun}
             onStartRun={startRun}
             failureDraft={failureDraft}
             onFailureDraftChange={setFailureDraft}
@@ -1051,6 +1121,9 @@ function App() {
             onCreateInvite={createInvite}
             onChangeRole={changeMemberRole}
             onToggleRunVisibility={toggleRunVisibility}
+            onUpdateMemberName={updateMemberName}
+            onRemoveMember={removeMember}
+            onTransferOwner={transferOwner}
           />
         )}
       </section>
@@ -1373,7 +1446,7 @@ function InventoryView({
           <form className="inventory-form" onSubmit={onAddInventory}>
             <label>
               药品图片
-              <input name="image" type="file" accept="image/*" capture="environment" />
+              <input name="images" type="file" accept="image/*" capture="environment" multiple />
             </label>
             <label>
               药品名称
@@ -1466,6 +1539,13 @@ function InventoryView({
                     <span key={tag}>{tag}</span>
                   ))}
                 </div>
+                {item.imageUrls.length > 1 && (
+                  <div className="chemical-thumbs">
+                    {item.imageUrls.map((url, index) => (
+                      <img key={url} src={url} alt={`${item.name} 图片 ${index + 1}`} />
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="stock-panel">
                 <span>库存</span>
@@ -1554,6 +1634,10 @@ function OrdersView({
             <input name="supplier" placeholder="例如 Solarbio、国药、Merck" />
           </label>
           <label>
+            货号
+            <input name="catalogNumber" placeholder="供应商货号" />
+          </label>
+          <label>
             数量
             <input name="quantity" type="number" min="1" step="1" defaultValue="1" required />
           </label>
@@ -1582,6 +1666,7 @@ function OrdersView({
               <div>
                 <strong>{order.chemicalName}</strong>
                 <span>{order.specification}</span>
+                {order.catalogNumber && <small>货号：{order.catalogNumber}</small>}
                 {order.note && <small>{order.note}</small>}
               </div>
               <span>{order.supplier || "未填写供应商"}</span>
@@ -1619,6 +1704,9 @@ function ProtocolsView({
   currentMember,
   members,
   protocols,
+  allTags,
+  activeTag,
+  onTagChange,
   query,
   onQueryChange,
   showForm,
@@ -1636,6 +1724,9 @@ function ProtocolsView({
   currentMember: Member;
   members: Member[];
   protocols: Protocol[];
+  allTags: string[];
+  activeTag: string;
+  onTagChange: (value: string) => void;
   query: string;
   onQueryChange: (value: string) => void;
   showForm: boolean;
@@ -1679,6 +1770,19 @@ function ProtocolsView({
       />
 
       <UploadAccessPanel />
+
+      <div className="tag-filter-panel">
+        {allTags.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className={tag === activeTag ? "active" : ""}
+            onClick={() => onTagChange(tag)}
+          >
+            {tag}
+          </button>
+        ))}
+      </div>
 
       {!canManageContent && (
         <Notice icon={<Lock />} text={`当前身份为${roleText[currentMember.role]}，可以使用模板，不能上传或更改模板。`} />
@@ -1820,6 +1924,7 @@ function RunsView({
   onToggleStep,
   onFinishRun,
   onStartRun,
+  onDeleteRun,
   failureDraft,
   onFailureDraftChange
 }: {
@@ -1834,6 +1939,7 @@ function RunsView({
   onToggleStep: (runId: string, stepId: string) => void;
   onFinishRun: (result: RunResult) => void;
   onStartRun: (protocolId: string) => void;
+  onDeleteRun: (runId: string) => void;
   failureDraft: { failureReason: string; failureStepId: string; failureNotes: string };
   onFailureDraftChange: (value: { failureReason: string; failureStepId: string; failureNotes: string }) => void;
 }) {
@@ -1876,13 +1982,21 @@ function RunsView({
                 <h2>{protocol.title}</h2>
                 <span>{selectedRun.startedAt}</span>
               </div>
-              {selectedRun.resultStatus ? (
-                <span className={`result-badge result-${selectedRun.resultStatus.toLowerCase()}`}>
-                  {runResultText[selectedRun.resultStatus]}
-                </span>
-              ) : (
-                <span className="result-badge result-progress">进行中</span>
-              )}
+              <div className="run-hero-actions">
+                {selectedRun.resultStatus ? (
+                  <span className={`result-badge result-${selectedRun.resultStatus.toLowerCase()}`}>
+                    {runResultText[selectedRun.resultStatus]}
+                  </span>
+                ) : (
+                  <span className="result-badge result-progress">进行中</span>
+                )}
+                {selectedRun.operatorUserId === currentMember.id && (
+                  <button className="secondary-button danger" type="button" onClick={() => onDeleteRun(selectedRun.id)}>
+                    <Trash2 size={16} />
+                    删除记录
+                  </button>
+                )}
+              </div>
             </div>
 
             {selectedRun.status !== "IN_PROGRESS" && (
@@ -1983,7 +2097,10 @@ function TeamView({
   inviteLink,
   onCreateInvite,
   onChangeRole,
-  onToggleRunVisibility
+  onToggleRunVisibility,
+  onUpdateMemberName,
+  onRemoveMember,
+  onTransferOwner
 }: {
   members: Member[];
   currentMember: Member;
@@ -1993,6 +2110,9 @@ function TeamView({
   onCreateInvite: () => void;
   onChangeRole: (userId: string, role: "ADMIN" | "MEMBER") => void;
   onToggleRunVisibility: (userId: string) => void;
+  onUpdateMemberName: (userId: string, currentName: string) => void;
+  onRemoveMember: (userId: string, memberName: string) => void;
+  onTransferOwner: (userId: string, memberName: string) => void;
 }) {
   return (
     <div className="page-grid">
@@ -2038,6 +2158,13 @@ function TeamView({
               <div className="member-actions">
                 <button
                   className="secondary-button"
+                  disabled={member.role === "OWNER" || (!isOwner && !(currentMember.role === "ADMIN" && member.role === "MEMBER"))}
+                  onClick={() => onUpdateMemberName(member.id, member.name)}
+                >
+                  修改姓名
+                </button>
+                <button
+                  className="secondary-button"
                   disabled={!isOwner || member.role === "OWNER"}
                   onClick={() => onChangeRole(member.id, member.role === "ADMIN" ? "MEMBER" : "ADMIN")}
                 >
@@ -2045,10 +2172,24 @@ function TeamView({
                 </button>
                 <button
                   className="secondary-button"
-                  disabled={!isOwner || member.role === "OWNER"}
+                  disabled={!isOwner || member.role !== "MEMBER"}
                   onClick={() => onToggleRunVisibility(member.id)}
                 >
                   {member.canViewAllRuns ? "关闭记录权限" : "允许看全部记录"}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={!isOwner || member.role === "OWNER"}
+                  onClick={() => onTransferOwner(member.id, member.name)}
+                >
+                  转让群主
+                </button>
+                <button
+                  className="secondary-button danger"
+                  disabled={member.role === "OWNER" || (!isOwner && !(currentMember.role === "ADMIN" && member.role === "MEMBER"))}
+                  onClick={() => onRemoveMember(member.id, member.name)}
+                >
+                  移出
                 </button>
               </div>
             </div>

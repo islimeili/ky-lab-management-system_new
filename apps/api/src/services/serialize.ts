@@ -17,9 +17,16 @@ type FileLike = {
 type ExperimentRunLike = Record<string, unknown>;
 
 export function serializeInventoryItem<T extends InventoryItemLike>(item: T) {
+  const record = item as T & {
+    imageFile?: FileLike | null;
+    imageFiles?: FileLike[];
+  };
+
   return {
     ...item,
-    quantity: Number(item.quantity)
+    quantity: Number(item.quantity),
+    imageFile: record.imageFile ? serializeFile(record.imageFile) : record.imageFile,
+    imageFiles: Array.isArray(record.imageFiles) ? record.imageFiles.map(serializeFile) : record.imageFiles
   };
 }
 

@@ -20,7 +20,8 @@ const inventorySchema = z.object({
   status: z.enum(["ACTIVE", "LOW_STOCK", "EXPIRED", "DISPOSED", "ARCHIVED"]).optional(),
   hazardTags: z.array(z.string()).optional(),
   notes: z.string().optional().nullable(),
-  imageFileId: z.string().optional().nullable()
+  imageFileId: z.string().optional().nullable(),
+  imageFileIds: z.array(z.string()).optional()
 });
 
 const updateInventorySchema = inventorySchema.omit({ teamId: true, quantity: true }).partial();
@@ -68,7 +69,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
             ]
           : undefined
       },
-      include: { imageFile: true },
+      include: { imageFile: true, imageFiles: true },
       orderBy: { updatedAt: "desc" }
     });
 
@@ -109,6 +110,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
       where: { id: params.itemId },
       include: {
         imageFile: true,
+        imageFiles: true,
         events: {
           include: { user: { select: { id: true, name: true, email: true } } },
           orderBy: { createdAt: "desc" }
@@ -138,12 +140,41 @@ export async function inventoryRoutes(app: FastifyInstance) {
     const item = await app.prisma.$transaction(async (tx) => {
       const created = await tx.inventoryItem.create({
         data: {
-          ...body,
+          teamId: body.teamId,
+          name: body.name,
+          alias: body.alias,
+          casNumber: body.casNumber,
+          specification: body.specification,
+          supplier: body.supplier,
+          catalogNumber: body.catalogNumber,
+          batchNumber: body.batchNumber,
           expiresAt: body.expiresAt ?? undefined,
           hazardTags: body.hazardTags ?? [],
-          quantity: body.quantity
-        }
+          notes: body.notes,
+          imageFileId: body.imageFileId,
+          quantity: body.quantity,
+          unit: body.unit,
+          location: body.location,
+          status: body.status
+        },
+        include: { imageFile: true, imageFiles: true }
       });
+
+      const imageFileIds = Array.from(new Set([
+        ...(body.imageFileId ? [body.imageFileId] : []),
+        ...(body.imageFileIds ?? [])
+      ]));
+
+      if (imageFileIds.length > 0) {
+        await tx.fileAsset.updateMany({
+          where: {
+            id: { in: imageFileIds },
+            teamId: body.teamId,
+            kind: "CHEMICAL_IMAGE"
+          },
+          data: { inventoryItemId: created.id }
+        });
+      }
 
       await tx.inventoryEvent.create({
         data: {
@@ -169,7 +200,12 @@ export async function inventoryRoutes(app: FastifyInstance) {
       entityId: item.id
     });
 
-    await reply.code(201).send({ item: serializeInventoryItem(item) });
+    const createdWithImages = await app.prisma.inventoryItem.findUniqueOrThrow({
+      where: { id: item.id },
+      include: { imageFile: true, imageFiles: true }
+    });
+
+    await reply.code(201).send({ item: serializeInventoryItem(createdWithImages) });
   });
 
   app.patch("/inventory/:itemId", async (request, reply) => {
@@ -185,13 +221,15 @@ export async function inventoryRoutes(app: FastifyInstance) {
     const membership = await requireOwnerOrAdmin(app, request as AuthenticatedRequest, reply, item.teamId);
     if (!membership) return;
 
+    const { imageFileIds: _imageFileIds, ...inventoryData } = body;
     const updated = await app.prisma.inventoryItem.update({
       where: { id: params.itemId },
       data: {
-        ...body,
+        ...inventoryData,
         expiresAt: body.expiresAt ?? undefined,
         hazardTags: body.hazardTags ?? undefined
-      }
+      },
+      include: { imageFile: true, imageFiles: true }
     });
 
     await writeAudit(app, {

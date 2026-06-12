@@ -19,7 +19,7 @@ export async function runRoutes(app: FastifyInstance) {
   app.addHook("onRequest", app.authenticate);
 
   function canViewAllRuns(membership: { role: string; canViewAllRuns?: boolean }) {
-    return membership.role === "OWNER" || membership.canViewAllRuns === true;
+    return membership.role === "OWNER" || membership.role === "ADMIN" || membership.canViewAllRuns === true;
   }
 
   app.get("/runs", async (request, reply) => {
@@ -118,6 +118,43 @@ export async function runRoutes(app: FastifyInstance) {
     });
 
     await reply.code(201).send({ run });
+  });
+
+  app.delete("/runs/:runId", async (request, reply) => {
+    const params = z.object({ runId: z.string() }).parse(request.params);
+    const run = await app.prisma.experimentRun.findUnique({ where: { id: params.runId } });
+
+    if (!run) {
+      await reply.code(404).send({ message: "实验记录不存在" });
+      return;
+    }
+
+    const membership = await requireMembership(app, request as AuthenticatedRequest, reply, run.teamId);
+    if (!membership) return;
+
+    if (run.operatorUserId !== request.user.sub) {
+      await reply.code(403).send({ message: "只能删除自己开始的实验记录" });
+      return;
+    }
+
+    await app.prisma.$transaction(async (tx) => {
+      await tx.fileAsset.updateMany({
+        where: { runId: run.id },
+        data: { runId: null }
+      });
+      await tx.runStep.deleteMany({ where: { runId: run.id } });
+      await tx.experimentRun.delete({ where: { id: run.id } });
+    });
+
+    await writeAudit(app, {
+      teamId: run.teamId,
+      userId: request.user.sub,
+      action: "EXPERIMENT_RUN_DELETED",
+      entity: "experiment_run",
+      entityId: run.id
+    });
+
+    await reply.code(204).send();
   });
 
   app.patch("/runs/:runId/steps/:stepId", async (request, reply) => {

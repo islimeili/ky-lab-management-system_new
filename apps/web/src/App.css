@@ -766,6 +766,21 @@ label {
   object-fit: cover;
 }
 
+.chemical-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chemical-thumbs img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border: 1px solid #dbe7df;
+  border-radius: 8px;
+  background: #eef4ef;
+}
+
 .chemical-main {
   min-width: 0;
   display: grid;
@@ -987,6 +1002,27 @@ label {
   font-size: 13px;
 }
 
+.tag-filter-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-filter-panel button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #d7e5dc;
+  border-radius: 8px;
+  color: #516059;
+  background: #ffffff;
+}
+
+.tag-filter-panel button.active {
+  color: #ffffff;
+  border-color: #25745f;
+  background: #25745f;
+}
+
 .upload-icon {
   width: 42px;
   height: 42px;
@@ -1101,6 +1137,17 @@ label {
 .run-hero .eyebrow,
 .run-hero span {
   color: #e7f6f0;
+}
+
+.run-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.run-hero-actions .secondary-button {
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .result-success {
@@ -1256,7 +1303,7 @@ label {
 .member-row {
   min-height: 70px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 110px 130px 120px 280px;
+  grid-template-columns: minmax(0, 1fr) 110px 130px 120px minmax(360px, 1.2fr);
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -1276,8 +1323,15 @@ label {
 
 .member-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.member-actions .secondary-button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .notice {

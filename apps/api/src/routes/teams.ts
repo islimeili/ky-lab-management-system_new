@@ -15,6 +15,14 @@ const runVisibilitySchema = z.object({
   canViewAllRuns: z.boolean()
 });
 
+const memberNameSchema = z.object({
+  name: z.string().min(1).max(80)
+});
+
+const transferOwnerSchema = z.object({
+  userId: z.string()
+});
+
 export async function teamRoutes(app: FastifyInstance) {
   app.addHook("onRequest", app.authenticate);
 
@@ -31,7 +39,7 @@ export async function teamRoutes(app: FastifyInstance) {
         id: membership.team.id,
         name: membership.team.name,
         role: membership.role,
-        canViewAllRuns: membership.role === "OWNER" || membership.canViewAllRuns,
+        canViewAllRuns: membership.role === "OWNER" || membership.role === "ADMIN" || membership.canViewAllRuns,
         fileUploadEnabled: membership.team.fileUploadEnabled,
         joinedAt: membership.joinedAt
       }))
@@ -77,7 +85,12 @@ export async function teamRoutes(app: FastifyInstance) {
       orderBy: [{ role: "asc" }, { joinedAt: "asc" }]
     });
 
-    return { members };
+    return {
+      members: members.map((member) => ({
+        ...member,
+        canViewAllRuns: member.role === "OWNER" || member.role === "ADMIN" || member.canViewAllRuns
+      }))
+    };
   });
 
   app.post("/teams/:teamId/invites", async (request, reply) => {
@@ -157,7 +170,10 @@ export async function teamRoutes(app: FastifyInstance) {
 
     const updated = await app.prisma.teamMember.update({
       where: { id: target.id },
-      data: { role: body.role }
+      data: {
+        role: body.role,
+        canViewAllRuns: body.role === "ADMIN"
+      }
     });
 
     await writeAudit(app, {
@@ -170,6 +186,48 @@ export async function teamRoutes(app: FastifyInstance) {
     });
 
     await reply.send({ member: updated });
+  });
+
+  app.patch("/teams/:teamId/members/:userId/name", async (request, reply) => {
+    const params = z.object({ teamId: z.string(), userId: z.string() }).parse(request.params);
+    const body = memberNameSchema.parse(request.body);
+    const actor = await requireOwnerOrAdmin(app, request as AuthenticatedRequest, reply, params.teamId);
+    if (!actor) return;
+
+    const target = await app.prisma.teamMember.findUnique({
+      where: { teamId_userId: { teamId: params.teamId, userId: params.userId } },
+      include: { user: true }
+    });
+
+    if (!target) {
+      await reply.code(404).send({ message: "成员不存在" });
+      return;
+    }
+
+    if (target.role === "OWNER") {
+      await reply.code(400).send({ message: "不能在成员列表中修改群主姓名" });
+      return;
+    }
+
+    if (actor.role === "ADMIN" && target.role !== "MEMBER") {
+      await reply.code(403).send({ message: "管理员只能修改普通成员姓名" });
+      return;
+    }
+
+    const user = await app.prisma.user.update({
+      where: { id: params.userId },
+      data: { name: body.name }
+    });
+
+    await writeAudit(app, {
+      teamId: params.teamId,
+      userId: request.user.sub,
+      action: "TEAM_MEMBER_NAME_UPDATED",
+      entity: "user",
+      entityId: user.id
+    });
+
+    await reply.send({ user });
   });
 
   app.patch("/teams/:teamId/members/:userId/run-visibility", async (request, reply) => {
@@ -192,6 +250,11 @@ export async function teamRoutes(app: FastifyInstance) {
       return;
     }
 
+    if (target.role === "ADMIN") {
+      await reply.code(400).send({ message: "管理员默认可以查看所有执行记录" });
+      return;
+    }
+
     const updated = await app.prisma.teamMember.update({
       where: { id: target.id },
       data: { canViewAllRuns: body.canViewAllRuns }
@@ -211,8 +274,8 @@ export async function teamRoutes(app: FastifyInstance) {
 
   app.delete("/teams/:teamId/members/:userId", async (request, reply) => {
     const params = z.object({ teamId: z.string(), userId: z.string() }).parse(request.params);
-    const membership = await requireOwner(app, request as AuthenticatedRequest, reply, params.teamId);
-    if (!membership) return;
+    const actor = await requireOwnerOrAdmin(app, request as AuthenticatedRequest, reply, params.teamId);
+    if (!actor) return;
 
     const target = await app.prisma.teamMember.findUnique({
       where: { teamId_userId: { teamId: params.teamId, userId: params.userId } }
@@ -228,6 +291,11 @@ export async function teamRoutes(app: FastifyInstance) {
       return;
     }
 
+    if (target.role === "ADMIN" && actor.role !== "OWNER") {
+      await reply.code(403).send({ message: "管理员只能移除普通成员" });
+      return;
+    }
+
     await app.prisma.teamMember.delete({ where: { id: target.id } });
     await writeAudit(app, {
       teamId: params.teamId,
@@ -238,5 +306,56 @@ export async function teamRoutes(app: FastifyInstance) {
     });
 
     await reply.code(204).send();
+  });
+
+  app.patch("/teams/:teamId/owner", async (request, reply) => {
+    const params = z.object({ teamId: z.string() }).parse(request.params);
+    const body = transferOwnerSchema.parse(request.body);
+    const actor = await requireOwner(app, request as AuthenticatedRequest, reply, params.teamId);
+    if (!actor) return;
+
+    if (body.userId === request.user.sub) {
+      await reply.code(400).send({ message: "对方已经是群主" });
+      return;
+    }
+
+    const target = await app.prisma.teamMember.findUnique({
+      where: { teamId_userId: { teamId: params.teamId, userId: body.userId } }
+    });
+
+    if (!target) {
+      await reply.code(404).send({ message: "目标成员不存在" });
+      return;
+    }
+
+    const result = await app.prisma.$transaction(async (tx) => {
+      const team = await tx.team.update({
+        where: { id: params.teamId },
+        data: { ownerUserId: body.userId }
+      });
+
+      await tx.teamMember.update({
+        where: { id: actor.id },
+        data: { role: "ADMIN", canViewAllRuns: true }
+      });
+
+      const member = await tx.teamMember.update({
+        where: { id: target.id },
+        data: { role: "OWNER", canViewAllRuns: true }
+      });
+
+      return { team, member };
+    });
+
+    await writeAudit(app, {
+      teamId: params.teamId,
+      userId: request.user.sub,
+      action: "TEAM_OWNER_TRANSFERRED",
+      entity: "team",
+      entityId: params.teamId,
+      metadata: { newOwnerUserId: body.userId }
+    });
+
+    await reply.send(result);
   });
 }

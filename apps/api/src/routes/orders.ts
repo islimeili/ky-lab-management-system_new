@@ -8,6 +8,7 @@ const orderSchema = z.object({
   chemicalName: z.string().min(1).max(180),
   specification: z.string().max(180).optional().nullable(),
   supplier: z.string().max(180).optional().nullable(),
+  catalogNumber: z.string().max(120).optional().nullable(),
   quantity: z.coerce.number().positive(),
   unit: z.string().min(1).max(40),
   note: z.string().max(1000).optional().nullable()
@@ -62,6 +63,7 @@ export async function orderRoutes(app: FastifyInstance) {
         chemicalName: body.chemicalName,
         specification: body.specification,
         supplier: body.supplier,
+        catalogNumber: body.catalogNumber,
         quantity: body.quantity,
         unit: body.unit,
         note: body.note
