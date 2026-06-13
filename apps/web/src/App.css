@@ -1334,6 +1334,87 @@ label {
   font-size: 12px;
 }
 
+.messages-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(320px, 1.2fr) minmax(300px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.message-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.message-form {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e0e9e1;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.message-list {
+  display: grid;
+  gap: 10px;
+}
+
+.message-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e2ebe4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.message-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.message-card-head span,
+.message-meta {
+  color: #66716a;
+  font-size: 12px;
+}
+
+.message-card p {
+  margin: 0;
+  color: #26332d;
+  line-height: 1.6;
+}
+
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reminder-card {
+  border-color: #f0d19d;
+  background: #fff9ed;
+}
+
+.direct-message.sent {
+  border-color: #a9d5c5;
+  background: #f0f9f4;
+}
+
+.direct-message.received {
+  border-color: #cfdfe7;
+  background: #f6fbfc;
+}
+
+.announcement-card {
+  border-color: #cfe0d6;
+  background: #f8fbf7;
+}
+
 .notice {
   min-height: 58px;
   display: flex;
@@ -1361,7 +1442,8 @@ label {
 
   .inventory-layout,
   .two-column,
-  .runs-layout {
+  .runs-layout,
+  .messages-layout {
     grid-template-columns: 1fr;
   }
 

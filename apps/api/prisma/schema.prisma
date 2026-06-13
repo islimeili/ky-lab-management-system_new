@@ -60,6 +60,11 @@ enum PurchaseOrderStatus {
   CANCELED
 }
 
+enum TeamMessageKind {
+  DIRECT
+  ANNOUNCEMENT
+}
+
 model User {
   id            String          @id @default(uuid())
   email         String          @unique
@@ -76,6 +81,8 @@ model User {
   files         FileAsset[]     @relation("FileUploader")
   auditLogs     AuditLog[]
   purchaseOrders PurchaseOrder[]
+  sentMessages  TeamMessage[]   @relation("MessageSender")
+  receivedMessages TeamMessage[] @relation("MessageRecipient")
 }
 
 model Team {
@@ -94,6 +101,7 @@ model Team {
   files             FileAsset[]
   auditLogs         AuditLog[]
   purchaseOrders    PurchaseOrder[]
+  messages          TeamMessage[]
 }
 
 model TeamMember {
@@ -281,6 +289,24 @@ model PurchaseOrder {
   requestedBy       User                @relation(fields: [requestedByUserId], references: [id])
 
   @@index([teamId, status, createdAt])
+}
+
+model TeamMessage {
+  id              String          @id @default(uuid())
+  teamId          String
+  senderUserId    String
+  recipientUserId String?
+  kind            TeamMessageKind
+  title           String?
+  body            String          @db.Text
+  createdAt       DateTime        @default(now())
+  team            Team            @relation(fields: [teamId], references: [id])
+  sender          User            @relation("MessageSender", fields: [senderUserId], references: [id])
+  recipient       User?           @relation("MessageRecipient", fields: [recipientUserId], references: [id])
+
+  @@index([teamId, kind, createdAt])
+  @@index([teamId, recipientUserId, createdAt])
+  @@index([senderUserId, createdAt])
 }
 
 model AuditLog {

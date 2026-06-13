@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Archive,
+  Bell,
   Camera,
   Check,
   CheckCircle2,
@@ -10,11 +11,14 @@ import {
   FlaskConical,
   Image as ImageIcon,
   Lock,
+  Megaphone,
+  MessageSquare,
   Package,
   Play,
   Plus,
   RefreshCcw,
   Search,
+  Send,
   ShieldCheck,
   ShoppingCart,
   Trash2,
@@ -31,7 +35,7 @@ type Role = "OWNER" | "ADMIN" | "MEMBER";
 type InventoryStatus = "ACTIVE" | "LOW_STOCK" | "EXPIRED" | "DISPOSED" | "ARCHIVED";
 type RunResult = "SUCCESS" | "FAILED" | "ABORTED";
 type OrderStatus = "PENDING" | "ORDERED" | "ARRIVED" | "CANCELED";
-type TabKey = "dashboard" | "inventory" | "orders" | "protocols" | "runs" | "team";
+type TabKey = "dashboard" | "inventory" | "orders" | "protocols" | "runs" | "team" | "messages";
 
 type User = {
   id: string;
@@ -152,6 +156,28 @@ type ExperimentRun = {
   startedAt: string;
   completedAt?: string;
   steps: RunStep[];
+};
+
+type SystemReminder = {
+  id: string;
+  title: string;
+  body: string;
+  itemName: string;
+  location: string;
+  expiresAt: string;
+  daysLeft?: number;
+};
+
+type TeamMessage = {
+  id: string;
+  kind: "DIRECT" | "ANNOUNCEMENT";
+  title?: string;
+  body: string;
+  senderUserId: string;
+  senderName: string;
+  recipientUserId?: string;
+  recipientName?: string;
+  createdAt: string;
 };
 
 const roleText: Record<Role, string> = {
@@ -409,6 +435,34 @@ function mapRun(run: ApiRecord): ExperimentRun {
   };
 }
 
+function mapSystemReminder(reminder: ApiRecord): SystemReminder {
+  return {
+    id: stringValue(reminder.id),
+    title: stringValue(reminder.title),
+    body: stringValue(reminder.body),
+    itemName: stringValue(reminder.itemName),
+    location: stringValue(reminder.location),
+    expiresAt: displayDateOnly(stringValue(reminder.expiresAt)),
+    daysLeft: reminder.daysLeft === null || reminder.daysLeft === undefined ? undefined : Number(reminder.daysLeft)
+  };
+}
+
+function mapTeamMessage(message: ApiRecord): TeamMessage {
+  const sender = asRecord(message.sender);
+  const recipient = asRecord(message.recipient);
+  return {
+    id: stringValue(message.id),
+    kind: message.kind as TeamMessage["kind"],
+    title: optionalString(message.title),
+    body: stringValue(message.body),
+    senderUserId: stringValue(message.senderUserId),
+    senderName: stringValue(sender.name, "未知成员"),
+    recipientUserId: optionalString(message.recipientUserId),
+    recipientName: optionalString(recipient.name),
+    createdAt: displayDate(stringValue(message.createdAt))
+  };
+}
+
 function extractInviteToken(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -460,6 +514,9 @@ function App() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [runs, setRuns] = useState<ExperimentRun[]>([]);
+  const [systemReminders, setSystemReminders] = useState<SystemReminder[]>([]);
+  const [directMessages, setDirectMessages] = useState<TeamMessage[]>([]);
+  const [announcements, setAnnouncements] = useState<TeamMessage[]>([]);
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [orderQuery, setOrderQuery] = useState("");
   const [protocolQuery, setProtocolQuery] = useState("");
@@ -570,16 +627,20 @@ function App() {
         setOrders([]);
         setProtocols([]);
         setRuns([]);
+        setSystemReminders([]);
+        setDirectMessages([]);
+        setAnnouncements([]);
         return;
       }
 
-      const [memberPayload, inventoryPayload, eventPayload, orderPayload, protocolPayload, runPayload] = await Promise.all([
+      const [memberPayload, inventoryPayload, eventPayload, orderPayload, protocolPayload, runPayload, messagePayload] = await Promise.all([
         apiRequest<{ members: ApiRecord[] }>(`/teams/${resolvedTeamId}/members`, nextSession.token),
         apiRequest<{ items: ApiRecord[] }>(`/inventory?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
         apiRequest<{ events: ApiRecord[] }>(`/inventory/events?teamId=${encodeURIComponent(resolvedTeamId)}&limit=50`, nextSession.token),
         apiRequest<{ orders: ApiRecord[] }>(`/orders?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
         apiRequest<{ protocols: ApiRecord[] }>(`/protocols?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
-        apiRequest<{ runs: ApiRecord[] }>(`/runs?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token)
+        apiRequest<{ runs: ApiRecord[] }>(`/runs?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
+        apiRequest<{ systemReminders: ApiRecord[]; directMessages: ApiRecord[]; announcements: ApiRecord[] }>(`/messages?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token)
       ]);
 
       const nextRuns = runPayload.runs.map(mapRun);
@@ -589,6 +650,9 @@ function App() {
       setOrders(orderPayload.orders.map(mapOrder));
       setProtocols(protocolPayload.protocols.map(mapProtocol));
       setRuns(nextRuns);
+      setSystemReminders(messagePayload.systemReminders.map(mapSystemReminder));
+      setDirectMessages(messagePayload.directMessages.map(mapTeamMessage));
+      setAnnouncements(messagePayload.announcements.map(mapTeamMessage));
       setSelectedRunId((current) => nextRuns.some((run) => run.id === current) ? current : nextRuns[0]?.id ?? "");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "加载数据失败");
@@ -652,6 +716,9 @@ function App() {
     setOrders([]);
     setProtocols([]);
     setRuns([]);
+    setSystemReminders([]);
+    setDirectMessages([]);
+    setAnnouncements([]);
   }
 
   async function handleTeamChange(teamId: string) {
@@ -762,6 +829,40 @@ function App() {
       method: "POST"
     });
     setInviteLink(`${window.location.origin}${window.location.pathname}?invite=${payload.invite.token}`);
+  }
+
+  async function sendDirectMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const recipientUserId = String(form.get("recipientUserId") ?? "");
+    const body = String(form.get("body") ?? "").trim();
+    if (!recipientUserId || !body) return;
+
+    await apiRequest("/messages/direct", session.token, {
+      method: "POST",
+      body: JSON.stringify({ teamId: activeTeamId, recipientUserId, body })
+    });
+    formElement.reset();
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function sendAnnouncement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId || !canManageContent) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const title = nullableFormValue(form, "title");
+    const body = String(form.get("body") ?? "").trim();
+    if (!body) return;
+
+    await apiRequest("/messages/announcements", session.token, {
+      method: "POST",
+      body: JSON.stringify({ teamId: activeTeamId, title, body })
+    });
+    formElement.reset();
+    await loadWorkspace(session, activeTeamId);
   }
 
   function openNewProtocolForm() {
@@ -1007,6 +1108,7 @@ function App() {
           <NavButton icon={<FlaskConical />} label="实验模板" tab="protocols" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<CheckCircle2 />} label="执行记录" tab="runs" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<Users />} label="团队权限" tab="team" activeTab={activeTab} onClick={setActiveTab} />
+          <NavButton icon={<MessageSquare />} label="消息" tab="messages" activeTab={activeTab} onClick={setActiveTab} />
         </nav>
       </aside>
 
@@ -1124,6 +1226,19 @@ function App() {
             onUpdateMemberName={updateMemberName}
             onRemoveMember={removeMember}
             onTransferOwner={transferOwner}
+          />
+        )}
+
+        {activeTab === "messages" && (
+          <MessagesView
+            members={members}
+            currentMember={currentMember}
+            canManageContent={canManageContent}
+            systemReminders={systemReminders}
+            directMessages={directMessages}
+            announcements={announcements}
+            onSendDirectMessage={sendDirectMessage}
+            onSendAnnouncement={sendAnnouncement}
           />
         )}
       </section>
@@ -1264,7 +1379,8 @@ function titleForTab(tab: TabKey) {
     orders: "药品订购",
     protocols: "实验模板",
     runs: "实验执行记录",
-    team: "团队权限"
+    team: "团队权限",
+    messages: "消息"
   };
   return titles[tab];
 }
@@ -2194,6 +2310,130 @@ function TeamView({
               </div>
             </div>
           ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MessagesView({
+  members,
+  currentMember,
+  canManageContent,
+  systemReminders,
+  directMessages,
+  announcements,
+  onSendDirectMessage,
+  onSendAnnouncement
+}: {
+  members: Member[];
+  currentMember: Member;
+  canManageContent: boolean;
+  systemReminders: SystemReminder[];
+  directMessages: TeamMessage[];
+  announcements: TeamMessage[];
+  onSendDirectMessage: (event: FormEvent<HTMLFormElement>) => void;
+  onSendAnnouncement: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const recipients = members.filter((member) => member.id !== currentMember.id);
+
+  return (
+    <div className="messages-layout">
+      <section className="panel message-panel system-panel">
+        <SectionHeader icon={<Bell />} title="系统提醒" />
+        <div className="message-list">
+          {systemReminders.map((reminder) => (
+            <article className="message-card reminder-card" key={reminder.id}>
+              <div className="message-card-head">
+                <strong>{reminder.title}</strong>
+                <span>{reminder.daysLeft === 0 ? "今天过期" : `${reminder.daysLeft ?? 0} 天内`}</span>
+              </div>
+              <p>{reminder.body}</p>
+              <div className="message-meta">
+                <span>{reminder.itemName}</span>
+                <span>{reminder.location}</span>
+                <span>{reminder.expiresAt}</span>
+              </div>
+            </article>
+          ))}
+          {systemReminders.length === 0 && <EmptyState icon={<Bell />} text="暂无临期药品提醒" />}
+        </div>
+      </section>
+
+      <section className="panel message-panel direct-panel">
+        <SectionHeader icon={<MessageSquare />} title="成员消息" />
+        <form className="message-form" onSubmit={onSendDirectMessage}>
+          <label>
+            接收人
+            <select name="recipientUserId" required disabled={recipients.length === 0}>
+              <option value="">选择成员</option>
+              {recipients.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            消息内容
+            <textarea name="body" rows={3} required placeholder="输入消息" />
+          </label>
+          <button className="primary-button" type="submit" disabled={recipients.length === 0}>
+            <Send size={18} />
+            发送
+          </button>
+        </form>
+
+        <div className="message-list">
+          {directMessages.map((message) => {
+            const isSent = message.senderUserId === currentMember.id;
+            return (
+              <article className={`message-card direct-message ${isSent ? "sent" : "received"}`} key={message.id}>
+                <div className="message-card-head">
+                  <strong>{isSent ? `发给 ${message.recipientName ?? "成员"}` : message.senderName}</strong>
+                  <span>{message.createdAt}</span>
+                </div>
+                <p>{message.body}</p>
+              </article>
+            );
+          })}
+          {directMessages.length === 0 && <EmptyState icon={<MessageSquare />} text="暂无成员消息" />}
+        </div>
+      </section>
+
+      <section className="panel message-panel announcement-panel">
+        <SectionHeader icon={<Megaphone />} title="实验室公告" />
+        {canManageContent && (
+          <form className="message-form" onSubmit={onSendAnnouncement}>
+            <label>
+              公告标题
+              <input name="title" placeholder="可选" />
+            </label>
+            <label>
+              公告内容
+              <textarea name="body" rows={3} required placeholder="输入公告" />
+            </label>
+            <button className="primary-button" type="submit">
+              <Megaphone size={18} />
+              发布公告
+            </button>
+          </form>
+        )}
+
+        <div className="message-list">
+          {announcements.map((announcement) => (
+            <article className="message-card announcement-card" key={announcement.id}>
+              <div className="message-card-head">
+                <strong>{announcement.title ?? "实验室公告"}</strong>
+                <span>{announcement.createdAt}</span>
+              </div>
+              <p>{announcement.body}</p>
+              <div className="message-meta">
+                <span>{announcement.senderName}</span>
+              </div>
+            </article>
+          ))}
+          {announcements.length === 0 && <EmptyState icon={<Megaphone />} text="暂无实验室公告" />}
         </div>
       </section>
     </div>
