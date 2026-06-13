@@ -1344,6 +1344,7 @@ label {
 .message-panel {
   display: grid;
   gap: 14px;
+  min-width: 0;
   padding: 18px;
 }
 
@@ -1364,6 +1365,7 @@ label {
 .message-card {
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 12px;
   border: 1px solid #e2ebe4;
   border-radius: 8px;
@@ -1372,6 +1374,7 @@ label {
 
 .message-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -1387,6 +1390,7 @@ label {
   margin: 0;
   color: #26332d;
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .message-meta {
@@ -1415,6 +1419,128 @@ label {
   background: #f8fbf7;
 }
 
+.mouse-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mouse-summary-card {
+  min-height: 92px;
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  padding: 16px;
+  border: 1px solid #dde5dc;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(40, 48, 43, 0.07);
+}
+
+.mouse-summary-card span {
+  color: #66716a;
+  font-size: 13px;
+}
+
+.mouse-summary-card strong {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.mouse-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.mouse-section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+}
+
+.mouse-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e0e9e1;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.mouse-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mouse-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e2ebe4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.mouse-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mouse-card-head span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: #17684f;
+  background: #e1f3eb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mouse-card p {
+  margin: 0;
+  color: #46534c;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mouse-meta,
+.mouse-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mouse-meta span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: #66716a;
+  background: #edf3ee;
+  font-size: 12px;
+}
+
+.mouse-actions {
+  justify-content: flex-end;
+}
+
+.mouse-actions .secondary-button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .notice {
   min-height: 58px;
   display: flex;
@@ -1435,6 +1561,7 @@ label {
 
 @media (max-width: 1180px) {
   .stat-grid,
+  .mouse-summary-grid,
   .protocol-grid,
   .permission-matrix {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1443,7 +1570,8 @@ label {
   .inventory-layout,
   .two-column,
   .runs-layout,
-  .messages-layout {
+  .messages-layout,
+  .mouse-board {
     grid-template-columns: 1fr;
   }
 
@@ -1467,12 +1595,11 @@ label {
   }
 
   .nav-list {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    overflow-x: auto;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    overflow-x: visible;
   }
 
   .nav-button {
-    min-width: 112px;
     justify-content: center;
   }
 
@@ -1515,8 +1642,10 @@ label {
   .inventory-form,
   .protocol-form,
   .order-form,
+  .mouse-form,
   .failure-grid,
   .permission-matrix,
+  .mouse-summary-grid,
   .stat-grid,
   .protocol-grid {
     grid-template-columns: 1fr;
@@ -1541,6 +1670,7 @@ label {
 
   .band-actions,
   .form-actions,
+  .mouse-actions,
   .next-run-panel,
   .step-editor-head {
     flex-direction: column;
@@ -1562,6 +1692,6 @@ label {
   }
 
   .nav-list {
-    grid-template-columns: repeat(6, 124px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

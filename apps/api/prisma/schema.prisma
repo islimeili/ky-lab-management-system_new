@@ -65,6 +65,45 @@ enum TeamMessageKind {
   ANNOUNCEMENT
 }
 
+enum MouseSex {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+
+enum MouseStatus {
+  ACTIVE
+  EXPERIMENT
+  BREEDING
+  PENDING_DISPOSAL
+  DISPOSED
+  DEAD
+  ARCHIVED
+}
+
+enum MouseCageStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum MouseBreedingStatus {
+  PAIRING
+  PREGNANT
+  LITTER_BORN
+  WEANED
+  CLOSED
+  ARCHIVED
+}
+
+enum MouseRecordType {
+  DOSING
+  SAMPLING
+  SURGERY
+  BEHAVIOR
+  EUTHANASIA
+  OTHER
+}
+
 model User {
   id            String          @id @default(uuid())
   email         String          @unique
@@ -83,6 +122,8 @@ model User {
   purchaseOrders PurchaseOrder[]
   sentMessages  TeamMessage[]   @relation("MessageSender")
   receivedMessages TeamMessage[] @relation("MessageRecipient")
+  mouseCagesCaretaking MouseCage[] @relation("MouseCageCaretaker")
+  mouseRecords MouseExperimentRecord[] @relation("MouseRecordOperator")
 }
 
 model Team {
@@ -102,6 +143,10 @@ model Team {
   auditLogs         AuditLog[]
   purchaseOrders    PurchaseOrder[]
   messages          TeamMessage[]
+  mouseCages        MouseCage[]
+  mouseAnimals      MouseAnimal[]
+  mouseBreedingPairs MouseBreedingPair[]
+  mouseExperimentRecords MouseExperimentRecord[]
 }
 
 model TeamMember {
@@ -307,6 +352,104 @@ model TeamMessage {
   @@index([teamId, kind, createdAt])
   @@index([teamId, recipientUserId, createdAt])
   @@index([senderUserId, createdAt])
+}
+
+model MouseCage {
+  id              String          @id @default(uuid())
+  teamId          String
+  cageCode        String
+  location        String?
+  rack            String?
+  layer           String?
+  capacity        Int?
+  strain          String?
+  caretakerUserId String?
+  status          MouseCageStatus @default(ACTIVE)
+  notes           String?         @db.Text
+  archivedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  team            Team            @relation(fields: [teamId], references: [id])
+  caretaker       User?           @relation("MouseCageCaretaker", fields: [caretakerUserId], references: [id])
+  animals         MouseAnimal[]
+  breedingPairs   MouseBreedingPair[]
+
+  @@index([teamId, status])
+  @@unique([teamId, cageCode])
+}
+
+model MouseAnimal {
+  id              String          @id @default(uuid())
+  teamId          String
+  cageId          String?
+  animalCode      String
+  strain          String?
+  genotype        String?
+  sex             MouseSex        @default(UNKNOWN)
+  birthDate       DateTime?
+  source          String?
+  supplier        String?
+  batchNumber     String?
+  status          MouseStatus     @default(ACTIVE)
+  notes           String?         @db.Text
+  archivedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  team            Team            @relation(fields: [teamId], references: [id])
+  cage            MouseCage?      @relation(fields: [cageId], references: [id])
+  fatherPairs     MouseBreedingPair[] @relation("FatherMouse")
+  motherPairs     MouseBreedingPair[] @relation("MotherMouse")
+  records         MouseExperimentRecord[]
+
+  @@index([teamId, status])
+  @@index([teamId, cageId])
+  @@unique([teamId, animalCode])
+}
+
+model MouseBreedingPair {
+  id              String              @id @default(uuid())
+  teamId          String
+  cageId          String?
+  fatherMouseId   String?
+  motherMouseId   String?
+  pairDate        DateTime?
+  separatedDate   DateTime?
+  litterDate      DateTime?
+  weanDate        DateTime?
+  litterCount     Int?
+  offspringCount  Int?
+  status          MouseBreedingStatus @default(PAIRING)
+  notes           String?             @db.Text
+  archivedAt      DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  team            Team                @relation(fields: [teamId], references: [id])
+  cage            MouseCage?          @relation(fields: [cageId], references: [id])
+  fatherMouse     MouseAnimal?        @relation("FatherMouse", fields: [fatherMouseId], references: [id])
+  motherMouse     MouseAnimal?        @relation("MotherMouse", fields: [motherMouseId], references: [id])
+
+  @@index([teamId, status])
+  @@index([teamId, cageId])
+}
+
+model MouseExperimentRecord {
+  id              String          @id @default(uuid())
+  teamId          String
+  mouseId         String
+  operatorUserId  String
+  recordType      MouseRecordType @default(OTHER)
+  title           String
+  performedAt     DateTime        @default(now())
+  notes           String?         @db.Text
+  archivedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  team            Team            @relation(fields: [teamId], references: [id])
+  mouse           MouseAnimal     @relation(fields: [mouseId], references: [id])
+  operator        User            @relation("MouseRecordOperator", fields: [operatorUserId], references: [id])
+
+  @@index([teamId, performedAt])
+  @@index([mouseId, performedAt])
 }
 
 model AuditLog {

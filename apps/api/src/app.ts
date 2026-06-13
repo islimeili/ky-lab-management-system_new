@@ -8,6 +8,7 @@ import { authRoutes } from "./routes/auth.js";
 import { fileRoutes } from "./routes/files.js";
 import { inventoryRoutes } from "./routes/inventory.js";
 import { messageRoutes } from "./routes/messages.js";
+import { mouseRoutes } from "./routes/mice.js";
 import { orderRoutes } from "./routes/orders.js";
 import { protocolRoutes } from "./routes/protocols.js";
 import { runRoutes } from "./routes/runs.js";
@@ -69,6 +70,7 @@ export async function buildApp() {
   await app.register(inventoryRoutes);
   await app.register(orderRoutes);
   await app.register(messageRoutes);
+  await app.register(mouseRoutes);
   await app.register(protocolRoutes);
   await app.register(runRoutes);
   await app.register(fileRoutes);

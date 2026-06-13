@@ -1,4 +1,5 @@
 import {
+  Activity,
   AlertTriangle,
   Archive,
   Bell,
@@ -35,7 +36,12 @@ type Role = "OWNER" | "ADMIN" | "MEMBER";
 type InventoryStatus = "ACTIVE" | "LOW_STOCK" | "EXPIRED" | "DISPOSED" | "ARCHIVED";
 type RunResult = "SUCCESS" | "FAILED" | "ABORTED";
 type OrderStatus = "PENDING" | "ORDERED" | "ARRIVED" | "CANCELED";
-type TabKey = "dashboard" | "inventory" | "orders" | "protocols" | "runs" | "team" | "messages";
+type MouseSex = "MALE" | "FEMALE" | "UNKNOWN";
+type MouseStatus = "ACTIVE" | "EXPERIMENT" | "BREEDING" | "PENDING_DISPOSAL" | "DISPOSED" | "DEAD" | "ARCHIVED";
+type MouseCageStatus = "ACTIVE" | "ARCHIVED";
+type MouseBreedingStatus = "PAIRING" | "PREGNANT" | "LITTER_BORN" | "WEANED" | "CLOSED" | "ARCHIVED";
+type MouseRecordType = "DOSING" | "SAMPLING" | "SURGERY" | "BEHAVIOR" | "EUTHANASIA" | "OTHER";
+type TabKey = "dashboard" | "inventory" | "orders" | "mice" | "protocols" | "runs" | "team" | "messages";
 
 type User = {
   id: string;
@@ -114,6 +120,70 @@ type PurchaseOrder = {
   requestedAt: string;
   status: OrderStatus;
   note?: string;
+};
+
+type MouseCage = {
+  id: string;
+  cageCode: string;
+  location?: string;
+  rack?: string;
+  layer?: string;
+  capacity?: number;
+  strain?: string;
+  caretakerUserId?: string;
+  caretakerName?: string;
+  status: MouseCageStatus;
+  notes?: string;
+  updatedAt: string;
+};
+
+type MouseAnimal = {
+  id: string;
+  cageId?: string;
+  cageCode?: string;
+  animalCode: string;
+  strain?: string;
+  genotype?: string;
+  sex: MouseSex;
+  birthDate?: string;
+  source?: string;
+  supplier?: string;
+  batchNumber?: string;
+  status: MouseStatus;
+  notes?: string;
+  updatedAt: string;
+};
+
+type MouseBreedingPair = {
+  id: string;
+  cageId?: string;
+  cageCode?: string;
+  fatherMouseId?: string;
+  fatherCode?: string;
+  motherMouseId?: string;
+  motherCode?: string;
+  pairDate?: string;
+  separatedDate?: string;
+  litterDate?: string;
+  weanDate?: string;
+  litterCount?: number;
+  offspringCount?: number;
+  status: MouseBreedingStatus;
+  notes?: string;
+  updatedAt: string;
+};
+
+type MouseExperimentRecord = {
+  id: string;
+  mouseId: string;
+  mouseCode: string;
+  operatorUserId: string;
+  operatorName: string;
+  recordType: MouseRecordType;
+  title: string;
+  performedAt: string;
+  performedAtInput: string;
+  notes?: string;
 };
 
 type ProtocolStep = {
@@ -205,6 +275,40 @@ const orderStatusText: Record<OrderStatus, string> = {
   ORDERED: "已下单",
   ARRIVED: "已到货",
   CANCELED: "已取消"
+};
+
+const mouseSexText: Record<MouseSex, string> = {
+  MALE: "雄性",
+  FEMALE: "雌性",
+  UNKNOWN: "未知"
+};
+
+const mouseStatusText: Record<MouseStatus, string> = {
+  ACTIVE: "在养",
+  EXPERIMENT: "实验中",
+  BREEDING: "繁殖中",
+  PENDING_DISPOSAL: "待处置",
+  DISPOSED: "已处置",
+  DEAD: "死亡",
+  ARCHIVED: "已归档"
+};
+
+const mouseBreedingStatusText: Record<MouseBreedingStatus, string> = {
+  PAIRING: "配笼中",
+  PREGNANT: "疑似/确认妊娠",
+  LITTER_BORN: "已产仔",
+  WEANED: "已断奶",
+  CLOSED: "已结束",
+  ARCHIVED: "已归档"
+};
+
+const mouseRecordTypeText: Record<MouseRecordType, string> = {
+  DOSING: "给药",
+  SAMPLING: "取样",
+  SURGERY: "手术",
+  BEHAVIOR: "行为学",
+  EUTHANASIA: "处置",
+  OTHER: "其他"
 };
 
 
@@ -307,6 +411,14 @@ function displayDateOnly(value?: string | null) {
   return date.toISOString().slice(0, 10);
 }
 
+function datetimeLocalValue(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
+}
+
 function tokenizedFileUrl(publicUrl: string | undefined, token: string) {
   if (!publicUrl) return undefined;
   return `${API_BASE}${publicUrl}?token=${encodeURIComponent(token)}`;
@@ -389,6 +501,85 @@ function mapOrder(order: ApiRecord): PurchaseOrder {
     requestedAt: displayDate(stringValue(order.createdAt ?? order.requestedAt)),
     status: order.status as OrderStatus,
     note: optionalString(order.note)
+  };
+}
+
+function mapMouseCage(cage: ApiRecord): MouseCage {
+  const caretaker = asRecord(cage.caretaker);
+  return {
+    id: stringValue(cage.id),
+    cageCode: stringValue(cage.cageCode),
+    location: optionalString(cage.location),
+    rack: optionalString(cage.rack),
+    layer: optionalString(cage.layer),
+    capacity: cage.capacity === null || cage.capacity === undefined ? undefined : Number(cage.capacity),
+    strain: optionalString(cage.strain),
+    caretakerUserId: optionalString(cage.caretakerUserId),
+    caretakerName: optionalString(caretaker.name),
+    status: cage.status as MouseCageStatus,
+    notes: optionalString(cage.notes),
+    updatedAt: displayDate(stringValue(cage.updatedAt))
+  };
+}
+
+function mapMouseAnimal(animal: ApiRecord): MouseAnimal {
+  const cage = asRecord(animal.cage);
+  return {
+    id: stringValue(animal.id),
+    cageId: optionalString(animal.cageId),
+    cageCode: optionalString(cage.cageCode),
+    animalCode: stringValue(animal.animalCode),
+    strain: optionalString(animal.strain),
+    genotype: optionalString(animal.genotype),
+    sex: animal.sex as MouseSex,
+    birthDate: displayDateOnly(stringValue(animal.birthDate)),
+    source: optionalString(animal.source),
+    supplier: optionalString(animal.supplier),
+    batchNumber: optionalString(animal.batchNumber),
+    status: animal.status as MouseStatus,
+    notes: optionalString(animal.notes),
+    updatedAt: displayDate(stringValue(animal.updatedAt))
+  };
+}
+
+function mapMouseBreedingPair(pair: ApiRecord): MouseBreedingPair {
+  const cage = asRecord(pair.cage);
+  const father = asRecord(pair.fatherMouse);
+  const mother = asRecord(pair.motherMouse);
+  return {
+    id: stringValue(pair.id),
+    cageId: optionalString(pair.cageId),
+    cageCode: optionalString(cage.cageCode),
+    fatherMouseId: optionalString(pair.fatherMouseId),
+    fatherCode: optionalString(father.animalCode),
+    motherMouseId: optionalString(pair.motherMouseId),
+    motherCode: optionalString(mother.animalCode),
+    pairDate: displayDateOnly(stringValue(pair.pairDate)),
+    separatedDate: displayDateOnly(stringValue(pair.separatedDate)),
+    litterDate: displayDateOnly(stringValue(pair.litterDate)),
+    weanDate: displayDateOnly(stringValue(pair.weanDate)),
+    litterCount: pair.litterCount === null || pair.litterCount === undefined ? undefined : Number(pair.litterCount),
+    offspringCount: pair.offspringCount === null || pair.offspringCount === undefined ? undefined : Number(pair.offspringCount),
+    status: pair.status as MouseBreedingStatus,
+    notes: optionalString(pair.notes),
+    updatedAt: displayDate(stringValue(pair.updatedAt))
+  };
+}
+
+function mapMouseExperimentRecord(record: ApiRecord): MouseExperimentRecord {
+  const mouse = asRecord(record.mouse);
+  const operator = asRecord(record.operator);
+  return {
+    id: stringValue(record.id),
+    mouseId: stringValue(record.mouseId),
+    mouseCode: stringValue(mouse.animalCode, "未知小鼠"),
+    operatorUserId: stringValue(record.operatorUserId),
+    operatorName: stringValue(operator.name, "未知成员"),
+    recordType: record.recordType as MouseRecordType,
+    title: stringValue(record.title),
+    performedAt: displayDate(stringValue(record.performedAt)),
+    performedAtInput: datetimeLocalValue(stringValue(record.performedAt)),
+    notes: optionalString(record.notes)
   };
 }
 
@@ -479,6 +670,11 @@ function nullableFormValue(form: FormData, key: string) {
   return value || null;
 }
 
+function nullableNumberFormValue(form: FormData, key: string) {
+  const value = String(form.get(key) ?? "").trim();
+  return value ? Number(value) : null;
+}
+
 function splitTags(value: string) {
   return value
     .split(/[，,]/)
@@ -512,6 +708,10 @@ function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [events, setEvents] = useState<InventoryEvent[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [mouseCages, setMouseCages] = useState<MouseCage[]>([]);
+  const [mouseAnimals, setMouseAnimals] = useState<MouseAnimal[]>([]);
+  const [mouseBreedingPairs, setMouseBreedingPairs] = useState<MouseBreedingPair[]>([]);
+  const [mouseRecords, setMouseRecords] = useState<MouseExperimentRecord[]>([]);
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [runs, setRuns] = useState<ExperimentRun[]>([]);
   const [systemReminders, setSystemReminders] = useState<SystemReminder[]>([]);
@@ -519,11 +719,16 @@ function App() {
   const [announcements, setAnnouncements] = useState<TeamMessage[]>([]);
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [orderQuery, setOrderQuery] = useState("");
+  const [mouseQuery, setMouseQuery] = useState("");
   const [protocolQuery, setProtocolQuery] = useState("");
   const [protocolTagFilter, setProtocolTagFilter] = useState("全部");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [showInventoryForm, setShowInventoryForm] = useState(false);
   const [showProtocolForm, setShowProtocolForm] = useState(false);
+  const [editingCageId, setEditingCageId] = useState<string | null>(null);
+  const [editingAnimalId, setEditingAnimalId] = useState<string | null>(null);
+  const [editingBreedingId, setEditingBreedingId] = useState<string | null>(null);
+  const [editingMouseRecordId, setEditingMouseRecordId] = useState<string | null>(null);
   const [editingProtocolId, setEditingProtocolId] = useState<string | null>(null);
   const [protocolStepDrafts, setProtocolStepDrafts] = useState<ProtocolStepDraft[]>([
     { id: "draft-step-1", title: "", description: "" }
@@ -554,6 +759,10 @@ function App() {
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0];
   const selectedVisibleRunId = selectedRun?.id ?? "";
   const editingProtocol = protocols.find((protocol) => protocol.id === editingProtocolId);
+  const editingCage = mouseCages.find((cage) => cage.id === editingCageId);
+  const editingAnimal = mouseAnimals.find((animal) => animal.id === editingAnimalId);
+  const editingBreedingPair = mouseBreedingPairs.find((pair) => pair.id === editingBreedingId);
+  const editingMouseRecord = mouseRecords.find((record) => record.id === editingMouseRecordId);
 
   useEffect(() => {
     if (session) {
@@ -599,6 +808,11 @@ function App() {
     return text.includes(orderQuery.toLowerCase());
   });
 
+  const filteredMouseAnimals = mouseAnimals.filter((animal) => {
+    const text = `${animal.animalCode} ${animal.strain ?? ""} ${animal.genotype ?? ""} ${animal.cageCode ?? ""} ${animal.supplier ?? ""} ${animal.notes ?? ""}`.toLowerCase();
+    return text.includes(mouseQuery.toLowerCase());
+  });
+
   async function loadWorkspace(nextSession = session, requestedTeamId = activeTeamId) {
     if (!nextSession) return;
     setLoading(true);
@@ -625,6 +839,10 @@ function App() {
         setInventory([]);
         setEvents([]);
         setOrders([]);
+        setMouseCages([]);
+        setMouseAnimals([]);
+        setMouseBreedingPairs([]);
+        setMouseRecords([]);
         setProtocols([]);
         setRuns([]);
         setSystemReminders([]);
@@ -633,11 +851,12 @@ function App() {
         return;
       }
 
-      const [memberPayload, inventoryPayload, eventPayload, orderPayload, protocolPayload, runPayload, messagePayload] = await Promise.all([
+      const [memberPayload, inventoryPayload, eventPayload, orderPayload, mousePayload, protocolPayload, runPayload, messagePayload] = await Promise.all([
         apiRequest<{ members: ApiRecord[] }>(`/teams/${resolvedTeamId}/members`, nextSession.token),
         apiRequest<{ items: ApiRecord[] }>(`/inventory?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
         apiRequest<{ events: ApiRecord[] }>(`/inventory/events?teamId=${encodeURIComponent(resolvedTeamId)}&limit=50`, nextSession.token),
         apiRequest<{ orders: ApiRecord[] }>(`/orders?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
+        apiRequest<{ cages: ApiRecord[]; animals: ApiRecord[]; breedingPairs: ApiRecord[]; records: ApiRecord[] }>(`/mice?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
         apiRequest<{ protocols: ApiRecord[] }>(`/protocols?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
         apiRequest<{ runs: ApiRecord[] }>(`/runs?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token),
         apiRequest<{ systemReminders: ApiRecord[]; directMessages: ApiRecord[]; announcements: ApiRecord[] }>(`/messages?teamId=${encodeURIComponent(resolvedTeamId)}`, nextSession.token)
@@ -648,6 +867,10 @@ function App() {
       setInventory(inventoryPayload.items.map((item) => mapInventoryItem(item, nextSession.token)));
       setEvents(eventPayload.events.map(mapInventoryEvent));
       setOrders(orderPayload.orders.map(mapOrder));
+      setMouseCages(mousePayload.cages.map(mapMouseCage));
+      setMouseAnimals(mousePayload.animals.map(mapMouseAnimal));
+      setMouseBreedingPairs(mousePayload.breedingPairs.map(mapMouseBreedingPair));
+      setMouseRecords(mousePayload.records.map(mapMouseExperimentRecord));
       setProtocols(protocolPayload.protocols.map(mapProtocol));
       setRuns(nextRuns);
       setSystemReminders(messagePayload.systemReminders.map(mapSystemReminder));
@@ -714,6 +937,10 @@ function App() {
     setInventory([]);
     setEvents([]);
     setOrders([]);
+    setMouseCages([]);
+    setMouseAnimals([]);
+    setMouseBreedingPairs([]);
+    setMouseRecords([]);
     setProtocols([]);
     setRuns([]);
     setSystemReminders([]);
@@ -980,6 +1207,141 @@ function App() {
     await loadWorkspace(session, activeTeamId);
   }
 
+  async function saveMouseCage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const body = {
+      teamId: activeTeamId,
+      cageCode: String(form.get("cageCode") ?? "").trim(),
+      location: nullableFormValue(form, "location"),
+      rack: nullableFormValue(form, "rack"),
+      layer: nullableFormValue(form, "layer"),
+      capacity: nullableNumberFormValue(form, "capacity"),
+      strain: nullableFormValue(form, "strain"),
+      caretakerUserId: nullableFormValue(form, "caretakerUserId"),
+      status: String(form.get("status") ?? "ACTIVE") as MouseCageStatus,
+      notes: nullableFormValue(form, "notes")
+    };
+    if (!body.cageCode) return;
+
+    await apiRequest(editingCageId ? `/mice/cages/${editingCageId}` : "/mice/cages", session.token, {
+      method: editingCageId ? "PATCH" : "POST",
+      body: JSON.stringify(editingCageId ? { ...body, teamId: undefined } : body)
+    });
+    formElement.reset();
+    setEditingCageId(null);
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function archiveMouseCage(cageId: string) {
+    if (!session || !window.confirm("确定归档这个笼位吗？")) return;
+    await apiRequest(`/mice/cages/${cageId}`, session.token, { method: "DELETE" });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function saveMouseAnimal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const body = {
+      teamId: activeTeamId,
+      animalCode: String(form.get("animalCode") ?? "").trim(),
+      cageId: nullableFormValue(form, "cageId"),
+      strain: nullableFormValue(form, "strain"),
+      genotype: nullableFormValue(form, "genotype"),
+      sex: String(form.get("sex") ?? "UNKNOWN") as MouseSex,
+      birthDate: nullableFormValue(form, "birthDate"),
+      source: nullableFormValue(form, "source"),
+      supplier: nullableFormValue(form, "supplier"),
+      batchNumber: nullableFormValue(form, "batchNumber"),
+      status: String(form.get("status") ?? "ACTIVE") as MouseStatus,
+      notes: nullableFormValue(form, "notes")
+    };
+    if (!body.animalCode) return;
+
+    await apiRequest(editingAnimalId ? `/mice/animals/${editingAnimalId}` : "/mice/animals", session.token, {
+      method: editingAnimalId ? "PATCH" : "POST",
+      body: JSON.stringify(editingAnimalId ? { ...body, teamId: undefined } : body)
+    });
+    formElement.reset();
+    setEditingAnimalId(null);
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function archiveMouseAnimal(animalId: string) {
+    if (!session || !window.confirm("确定归档这只小鼠吗？")) return;
+    await apiRequest(`/mice/animals/${animalId}`, session.token, { method: "DELETE" });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function saveMouseBreeding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const body = {
+      teamId: activeTeamId,
+      cageId: nullableFormValue(form, "cageId"),
+      fatherMouseId: nullableFormValue(form, "fatherMouseId"),
+      motherMouseId: nullableFormValue(form, "motherMouseId"),
+      pairDate: nullableFormValue(form, "pairDate"),
+      separatedDate: nullableFormValue(form, "separatedDate"),
+      litterDate: nullableFormValue(form, "litterDate"),
+      weanDate: nullableFormValue(form, "weanDate"),
+      litterCount: nullableNumberFormValue(form, "litterCount"),
+      offspringCount: nullableNumberFormValue(form, "offspringCount"),
+      status: String(form.get("status") ?? "PAIRING") as MouseBreedingStatus,
+      notes: nullableFormValue(form, "notes")
+    };
+
+    await apiRequest(editingBreedingId ? `/mice/breeding/${editingBreedingId}` : "/mice/breeding", session.token, {
+      method: editingBreedingId ? "PATCH" : "POST",
+      body: JSON.stringify(editingBreedingId ? { ...body, teamId: undefined } : body)
+    });
+    formElement.reset();
+    setEditingBreedingId(null);
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function archiveMouseBreeding(pairId: string) {
+    if (!session || !window.confirm("确定归档这条繁殖记录吗？")) return;
+    await apiRequest(`/mice/breeding/${pairId}`, session.token, { method: "DELETE" });
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function saveMouseRecord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !activeTeamId) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const body = {
+      teamId: activeTeamId,
+      mouseId: String(form.get("mouseId") ?? ""),
+      recordType: String(form.get("recordType") ?? "OTHER") as MouseRecordType,
+      title: String(form.get("title") ?? "").trim(),
+      performedAt: nullableFormValue(form, "performedAt") ?? undefined,
+      notes: nullableFormValue(form, "notes")
+    };
+    if (!body.mouseId || !body.title) return;
+
+    await apiRequest(editingMouseRecordId ? `/mice/records/${editingMouseRecordId}` : "/mice/records", session.token, {
+      method: editingMouseRecordId ? "PATCH" : "POST",
+      body: JSON.stringify(editingMouseRecordId ? { ...body, teamId: undefined } : body)
+    });
+    formElement.reset();
+    setEditingMouseRecordId(null);
+    await loadWorkspace(session, activeTeamId);
+  }
+
+  async function archiveMouseRecord(recordId: string) {
+    if (!session || !window.confirm("确定归档这条使用记录吗？")) return;
+    await apiRequest(`/mice/records/${recordId}`, session.token, { method: "DELETE" });
+    await loadWorkspace(session, activeTeamId);
+  }
+
   async function addProtocol(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || !activeTeamId || !canManageContent) return;
@@ -1105,6 +1467,7 @@ function App() {
           <NavButton icon={<ClipboardCheck />} label="工作台" tab="dashboard" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<Package />} label="药品管理" tab="inventory" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<ShoppingCart />} label="药品订购" tab="orders" activeTab={activeTab} onClick={setActiveTab} />
+          <NavButton icon={<Activity />} label="小鼠管理" tab="mice" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<FlaskConical />} label="实验模板" tab="protocols" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<CheckCircle2 />} label="执行记录" tab="runs" activeTab={activeTab} onClick={setActiveTab} />
           <NavButton icon={<Users />} label="团队权限" tab="team" activeTab={activeTab} onClick={setActiveTab} />
@@ -1167,6 +1530,35 @@ function App() {
             currentMember={currentMember}
             onAddOrderRequest={addOrderRequest}
             onUpdateOrderStatus={updateOrderStatus}
+          />
+        )}
+
+        {activeTab === "mice" && (
+          <MouseManagementView
+            members={members}
+            query={mouseQuery}
+            onQueryChange={setMouseQuery}
+            cages={mouseCages}
+            animals={filteredMouseAnimals}
+            allAnimals={mouseAnimals}
+            breedingPairs={mouseBreedingPairs}
+            records={mouseRecords}
+            editingCage={editingCage}
+            editingAnimal={editingAnimal}
+            editingBreedingPair={editingBreedingPair}
+            editingRecord={editingMouseRecord}
+            onEditCage={setEditingCageId}
+            onEditAnimal={setEditingAnimalId}
+            onEditBreeding={setEditingBreedingId}
+            onEditRecord={setEditingMouseRecordId}
+            onSaveCage={saveMouseCage}
+            onSaveAnimal={saveMouseAnimal}
+            onSaveBreeding={saveMouseBreeding}
+            onSaveRecord={saveMouseRecord}
+            onArchiveCage={archiveMouseCage}
+            onArchiveAnimal={archiveMouseAnimal}
+            onArchiveBreeding={archiveMouseBreeding}
+            onArchiveRecord={archiveMouseRecord}
           />
         )}
 
@@ -1377,6 +1769,7 @@ function titleForTab(tab: TabKey) {
     dashboard: "今日工作台",
     inventory: "药品管理",
     orders: "药品订购",
+    mice: "小鼠管理",
     protocols: "实验模板",
     runs: "实验执行记录",
     team: "团队权限",
@@ -1811,6 +2204,440 @@ function OrdersView({
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function MouseManagementView({
+  members,
+  query,
+  onQueryChange,
+  cages,
+  animals,
+  allAnimals,
+  breedingPairs,
+  records,
+  editingCage,
+  editingAnimal,
+  editingBreedingPair,
+  editingRecord,
+  onEditCage,
+  onEditAnimal,
+  onEditBreeding,
+  onEditRecord,
+  onSaveCage,
+  onSaveAnimal,
+  onSaveBreeding,
+  onSaveRecord,
+  onArchiveCage,
+  onArchiveAnimal,
+  onArchiveBreeding,
+  onArchiveRecord
+}: {
+  members: Member[];
+  query: string;
+  onQueryChange: (value: string) => void;
+  cages: MouseCage[];
+  animals: MouseAnimal[];
+  allAnimals: MouseAnimal[];
+  breedingPairs: MouseBreedingPair[];
+  records: MouseExperimentRecord[];
+  editingCage?: MouseCage;
+  editingAnimal?: MouseAnimal;
+  editingBreedingPair?: MouseBreedingPair;
+  editingRecord?: MouseExperimentRecord;
+  onEditCage: (id: string | null) => void;
+  onEditAnimal: (id: string | null) => void;
+  onEditBreeding: (id: string | null) => void;
+  onEditRecord: (id: string | null) => void;
+  onSaveCage: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveAnimal: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveBreeding: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveRecord: (event: FormEvent<HTMLFormElement>) => void;
+  onArchiveCage: (id: string) => void;
+  onArchiveAnimal: (id: string) => void;
+  onArchiveBreeding: (id: string) => void;
+  onArchiveRecord: (id: string) => void;
+}) {
+  return (
+    <div className="page-grid">
+      <Toolbar
+        icon={<Activity />}
+        title="小鼠管理"
+        searchValue={query}
+        searchPlaceholder="搜索小鼠编号、品系、基因型、笼号"
+        onSearchChange={onQueryChange}
+        action={<span className="limit-pill">团队成员均可维护</span>}
+      />
+
+      <section className="mouse-summary-grid">
+        <div className="mouse-summary-card">
+          <span>在册小鼠</span>
+          <strong>{allAnimals.length}</strong>
+        </div>
+        <div className="mouse-summary-card">
+          <span>笼位</span>
+          <strong>{cages.length}</strong>
+        </div>
+        <div className="mouse-summary-card">
+          <span>繁殖记录</span>
+          <strong>{breedingPairs.length}</strong>
+        </div>
+        <div className="mouse-summary-card">
+          <span>使用记录</span>
+          <strong>{records.length}</strong>
+        </div>
+      </section>
+
+      <div className="mouse-board">
+        <section className="panel mouse-section">
+          <SectionHeader icon={<Package />} title="笼位管理" />
+          <form className="mouse-form" onSubmit={onSaveCage} key={editingCage?.id ?? "new-cage"}>
+            <label>
+              笼号
+              <input name="cageCode" defaultValue={editingCage?.cageCode ?? ""} required />
+            </label>
+            <label>
+              位置
+              <input name="location" defaultValue={editingCage?.location ?? ""} placeholder="动物房 / 架位" />
+            </label>
+            <label>
+              架号
+              <input name="rack" defaultValue={editingCage?.rack ?? ""} />
+            </label>
+            <label>
+              层号
+              <input name="layer" defaultValue={editingCage?.layer ?? ""} />
+            </label>
+            <label>
+              容量
+              <input name="capacity" type="number" min="0" defaultValue={editingCage?.capacity ?? ""} />
+            </label>
+            <label>
+              品系
+              <input name="strain" defaultValue={editingCage?.strain ?? ""} />
+            </label>
+            <label>
+              负责人
+              <select name="caretakerUserId" defaultValue={editingCage?.caretakerUserId ?? ""}>
+                <option value="">未指定</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>{member.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              状态
+              <select name="status" defaultValue={editingCage?.status ?? "ACTIVE"}>
+                <option value="ACTIVE">启用</option>
+                <option value="ARCHIVED">归档</option>
+              </select>
+            </label>
+            <label className="wide">
+              备注
+              <textarea name="notes" rows={2} defaultValue={editingCage?.notes ?? ""} />
+            </label>
+            <div className="form-actions wide">
+              {editingCage && (
+                <button className="secondary-button" type="button" onClick={() => onEditCage(null)}>
+                  取消编辑
+                </button>
+              )}
+              <button className="primary-button" type="submit">
+                <Check size={18} />
+                {editingCage ? "保存笼位" : "新增笼位"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mouse-card-list">
+            {cages.map((cage) => (
+              <article className="mouse-card" key={cage.id}>
+                <div className="mouse-card-head">
+                  <strong>{cage.cageCode}</strong>
+                  <span>{cage.status === "ACTIVE" ? "启用" : "归档"}</span>
+                </div>
+                <p>{[cage.location, cage.rack, cage.layer].filter(Boolean).join(" / ") || "未填写位置"}</p>
+                <div className="mouse-meta">
+                  <span>{cage.strain || "未填品系"}</span>
+                  <span>{cage.capacity ? `容量 ${cage.capacity}` : "未填容量"}</span>
+                  <span>{cage.caretakerName || "未指定负责人"}</span>
+                </div>
+                <div className="mouse-actions">
+                  <button className="secondary-button" type="button" onClick={() => onEditCage(cage.id)}>编辑</button>
+                  <button className="secondary-button danger" type="button" onClick={() => onArchiveCage(cage.id)}>归档</button>
+                </div>
+              </article>
+            ))}
+            {cages.length === 0 && <EmptyState icon={<Package />} text="暂无笼位记录" />}
+          </div>
+        </section>
+
+        <section className="panel mouse-section">
+          <SectionHeader icon={<Activity />} title="小鼠档案" />
+          <form className="mouse-form" onSubmit={onSaveAnimal} key={editingAnimal?.id ?? "new-animal"}>
+            <label>
+              小鼠编号
+              <input name="animalCode" defaultValue={editingAnimal?.animalCode ?? ""} required />
+            </label>
+            <label>
+              所属笼位
+              <select name="cageId" defaultValue={editingAnimal?.cageId ?? ""}>
+                <option value="">未分配</option>
+                {cages.map((cage) => (
+                  <option key={cage.id} value={cage.id}>{cage.cageCode}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              品系
+              <input name="strain" defaultValue={editingAnimal?.strain ?? ""} />
+            </label>
+            <label>
+              基因型
+              <input name="genotype" defaultValue={editingAnimal?.genotype ?? ""} />
+            </label>
+            <label>
+              性别
+              <select name="sex" defaultValue={editingAnimal?.sex ?? "UNKNOWN"}>
+                <option value="UNKNOWN">未知</option>
+                <option value="MALE">雄性</option>
+                <option value="FEMALE">雌性</option>
+              </select>
+            </label>
+            <label>
+              出生日期
+              <input name="birthDate" type="date" defaultValue={editingAnimal?.birthDate ?? ""} />
+            </label>
+            <label>
+              来源
+              <input name="source" defaultValue={editingAnimal?.source ?? ""} />
+            </label>
+            <label>
+              供应商
+              <input name="supplier" defaultValue={editingAnimal?.supplier ?? ""} />
+            </label>
+            <label>
+              批次号
+              <input name="batchNumber" defaultValue={editingAnimal?.batchNumber ?? ""} />
+            </label>
+            <label>
+              状态
+              <select name="status" defaultValue={editingAnimal?.status ?? "ACTIVE"}>
+                {Object.entries(mouseStatusText).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="wide">
+              备注
+              <textarea name="notes" rows={2} defaultValue={editingAnimal?.notes ?? ""} />
+            </label>
+            <div className="form-actions wide">
+              {editingAnimal && (
+                <button className="secondary-button" type="button" onClick={() => onEditAnimal(null)}>
+                  取消编辑
+                </button>
+              )}
+              <button className="primary-button" type="submit">
+                <Check size={18} />
+                {editingAnimal ? "保存小鼠" : "新增小鼠"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mouse-card-list">
+            {animals.map((animal) => (
+              <article className="mouse-card" key={animal.id}>
+                <div className="mouse-card-head">
+                  <strong>{animal.animalCode}</strong>
+                  <span>{mouseStatusText[animal.status]}</span>
+                </div>
+                <p>{[animal.strain, animal.genotype].filter(Boolean).join(" / ") || "未填写品系与基因型"}</p>
+                <div className="mouse-meta">
+                  <span>{mouseSexText[animal.sex]}</span>
+                  <span>{animal.cageCode || "未分笼"}</span>
+                  <span>{animal.birthDate || "未填出生日期"}</span>
+                </div>
+                <div className="mouse-actions">
+                  <button className="secondary-button" type="button" onClick={() => onEditAnimal(animal.id)}>编辑</button>
+                  <button className="secondary-button danger" type="button" onClick={() => onArchiveAnimal(animal.id)}>归档</button>
+                </div>
+              </article>
+            ))}
+            {animals.length === 0 && <EmptyState icon={<Activity />} text="暂无匹配的小鼠档案" />}
+          </div>
+        </section>
+
+        <section className="panel mouse-section">
+          <SectionHeader icon={<Users />} title="繁殖记录" />
+          <form className="mouse-form" onSubmit={onSaveBreeding} key={editingBreedingPair?.id ?? "new-breeding"}>
+            <label>
+              笼位
+              <select name="cageId" defaultValue={editingBreedingPair?.cageId ?? ""}>
+                <option value="">未指定</option>
+                {cages.map((cage) => (
+                  <option key={cage.id} value={cage.id}>{cage.cageCode}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              父本
+              <select name="fatherMouseId" defaultValue={editingBreedingPair?.fatherMouseId ?? ""}>
+                <option value="">未指定</option>
+                {allAnimals.map((animal) => (
+                  <option key={animal.id} value={animal.id}>{animal.animalCode}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              母本
+              <select name="motherMouseId" defaultValue={editingBreedingPair?.motherMouseId ?? ""}>
+                <option value="">未指定</option>
+                {allAnimals.map((animal) => (
+                  <option key={animal.id} value={animal.id}>{animal.animalCode}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              配笼日期
+              <input name="pairDate" type="date" defaultValue={editingBreedingPair?.pairDate ?? ""} />
+            </label>
+            <label>
+              分笼日期
+              <input name="separatedDate" type="date" defaultValue={editingBreedingPair?.separatedDate ?? ""} />
+            </label>
+            <label>
+              产仔日期
+              <input name="litterDate" type="date" defaultValue={editingBreedingPair?.litterDate ?? ""} />
+            </label>
+            <label>
+              断奶日期
+              <input name="weanDate" type="date" defaultValue={editingBreedingPair?.weanDate ?? ""} />
+            </label>
+            <label>
+              窝数
+              <input name="litterCount" type="number" min="0" defaultValue={editingBreedingPair?.litterCount ?? ""} />
+            </label>
+            <label>
+              子代数量
+              <input name="offspringCount" type="number" min="0" defaultValue={editingBreedingPair?.offspringCount ?? ""} />
+            </label>
+            <label>
+              状态
+              <select name="status" defaultValue={editingBreedingPair?.status ?? "PAIRING"}>
+                {Object.entries(mouseBreedingStatusText).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="wide">
+              备注
+              <textarea name="notes" rows={2} defaultValue={editingBreedingPair?.notes ?? ""} />
+            </label>
+            <div className="form-actions wide">
+              {editingBreedingPair && (
+                <button className="secondary-button" type="button" onClick={() => onEditBreeding(null)}>
+                  取消编辑
+                </button>
+              )}
+              <button className="primary-button" type="submit">
+                <Check size={18} />
+                {editingBreedingPair ? "保存繁殖记录" : "新增繁殖记录"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mouse-card-list">
+            {breedingPairs.map((pair) => (
+              <article className="mouse-card" key={pair.id}>
+                <div className="mouse-card-head">
+                  <strong>{pair.fatherCode || "父本未定"} × {pair.motherCode || "母本未定"}</strong>
+                  <span>{mouseBreedingStatusText[pair.status]}</span>
+                </div>
+                <p>{pair.cageCode || "未指定笼位"}</p>
+                <div className="mouse-meta">
+                  <span>配笼 {pair.pairDate || "未填"}</span>
+                  <span>产仔 {pair.litterDate || "未填"}</span>
+                  <span>子代 {pair.offspringCount ?? 0}</span>
+                </div>
+                <div className="mouse-actions">
+                  <button className="secondary-button" type="button" onClick={() => onEditBreeding(pair.id)}>编辑</button>
+                  <button className="secondary-button danger" type="button" onClick={() => onArchiveBreeding(pair.id)}>归档</button>
+                </div>
+              </article>
+            ))}
+            {breedingPairs.length === 0 && <EmptyState icon={<Users />} text="暂无繁殖记录" />}
+          </div>
+        </section>
+
+        <section className="panel mouse-section">
+          <SectionHeader icon={<ClipboardCheck />} title="使用记录" />
+          <form className="mouse-form" onSubmit={onSaveRecord} key={editingRecord?.id ?? "new-record"}>
+            <label>
+              小鼠
+              <select name="mouseId" defaultValue={editingRecord?.mouseId ?? ""} required>
+                <option value="">选择小鼠</option>
+                {allAnimals.map((animal) => (
+                  <option key={animal.id} value={animal.id}>{animal.animalCode}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              类型
+              <select name="recordType" defaultValue={editingRecord?.recordType ?? "OTHER"}>
+                {Object.entries(mouseRecordTypeText).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              标题
+              <input name="title" defaultValue={editingRecord?.title ?? ""} required />
+            </label>
+            <label>
+              时间
+              <input name="performedAt" type="datetime-local" defaultValue={editingRecord?.performedAtInput ?? ""} />
+            </label>
+            <label className="wide">
+              备注
+              <textarea name="notes" rows={2} defaultValue={editingRecord?.notes ?? ""} />
+            </label>
+            <div className="form-actions wide">
+              {editingRecord && (
+                <button className="secondary-button" type="button" onClick={() => onEditRecord(null)}>
+                  取消编辑
+                </button>
+              )}
+              <button className="primary-button" type="submit">
+                <Check size={18} />
+                {editingRecord ? "保存使用记录" : "新增使用记录"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mouse-card-list">
+            {records.map((record) => (
+              <article className="mouse-card" key={record.id}>
+                <div className="mouse-card-head">
+                  <strong>{record.title}</strong>
+                  <span>{mouseRecordTypeText[record.recordType]}</span>
+                </div>
+                <p>{record.mouseCode} · {record.operatorName}</p>
+                <div className="mouse-meta">
+                  <span>{record.performedAt}</span>
+                </div>
+                {record.notes && <p>{record.notes}</p>}
+                <div className="mouse-actions">
+                  <button className="secondary-button" type="button" onClick={() => onEditRecord(record.id)}>编辑</button>
+                  <button className="secondary-button danger" type="button" onClick={() => onArchiveRecord(record.id)}>归档</button>
+                </div>
+              </article>
+            ))}
+            {records.length === 0 && <EmptyState icon={<ClipboardCheck />} text="暂无使用记录" />}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
