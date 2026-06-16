@@ -1206,6 +1206,46 @@ label {
   font-size: 13px;
 }
 
+.run-result-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.result-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.result-summary-grid > div,
+.result-note {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e0e9e1;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.result-summary-grid span,
+.result-note span {
+  display: block;
+  margin-bottom: 6px;
+  color: #66716a;
+  font-size: 12px;
+}
+
+.result-summary-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.result-note p {
+  margin: 0;
+  color: #26332d;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .run-hero {
   min-height: 150px;
   display: flex;
@@ -1341,8 +1381,15 @@ label {
   gap: 12px;
 }
 
-.export-panel .primary-button {
-  justify-self: start;
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.export-actions .primary-button,
+.export-actions .secondary-button {
+  flex: 0 1 auto;
 }
 
 .invite-row {
@@ -1749,6 +1796,7 @@ label {
   .order-form,
   .mouse-form,
   .failure-grid,
+  .result-summary-grid,
   .permission-matrix,
   .mouse-summary-grid,
   .stat-grid,
@@ -1777,6 +1825,7 @@ label {
   .band-actions,
   .form-actions,
   .mouse-actions,
+  .export-actions,
   .next-run-panel,
   .step-editor-head {
     flex-direction: column;

@@ -43,6 +43,9 @@ type MouseCageStatus = "ACTIVE" | "ARCHIVED";
 type MouseBreedingStatus = "PAIRING" | "PREGNANT" | "LITTER_BORN" | "WEANED" | "CLOSED" | "ARCHIVED";
 type MouseRecordType = "DOSING" | "SAMPLING" | "SURGERY" | "BEHAVIOR" | "EUTHANASIA" | "OTHER";
 type TabKey = "dashboard" | "inventory" | "orders" | "mice" | "protocols" | "runs" | "team" | "messages";
+type ExportFormat = "json" | "xlsx" | "bundle";
+type ExportModule = "inventory" | "orders" | "protocols" | "runs" | "mice" | "messages";
+type ExportTarget = ExportModule | "team";
 
 type User = {
   id: string;
@@ -1196,11 +1199,15 @@ function App() {
     setInviteLink(`${window.location.origin}${window.location.pathname}?invite=${payload.invite.token}`);
   }
 
-  async function exportTeamBackup() {
-    if (!session || !activeTeamId || !canManageContent) return;
+  async function downloadBackup(target: ExportTarget, format: ExportFormat) {
+    if (!session || !activeTeamId) return;
+    if (target === "team" && !canManageContent) return;
     setErrorMessage("");
     try {
-      const response = await fetch(`${API_BASE}/exports/team?teamId=${encodeURIComponent(activeTeamId)}`, {
+      const endpoint = target === "team"
+        ? `/exports/team?teamId=${encodeURIComponent(activeTeamId)}&format=${format}`
+        : `/exports/module?teamId=${encodeURIComponent(activeTeamId)}&module=${target}&format=${format}`;
+      const response = await fetch(`${API_BASE}${endpoint}`, {
         headers: { Authorization: `Bearer ${session.token}` }
       });
 
@@ -1218,7 +1225,8 @@ function App() {
       const blob = await response.blob();
       const disposition = response.headers.get("content-disposition") ?? "";
       const encodedName = disposition.match(/filename="([^"]+)"/)?.[1];
-      const fileName = encodedName ? decodeURIComponent(encodedName) : `lab-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const extension = format === "bundle" ? "zip" : format;
+      const fileName = encodedName ? decodeURIComponent(encodedName) : `lab-backup-${new Date().toISOString().slice(0, 10)}.${extension}`;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -1230,6 +1238,14 @@ function App() {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "导出失败");
     }
+  }
+
+  function exportTeamBackup(format: ExportFormat) {
+    void downloadBackup("team", format);
+  }
+
+  function exportModuleBackup(module: ExportModule, format: ExportFormat) {
+    void downloadBackup(module, format);
   }
 
   async function sendDirectMessage(event: FormEvent<HTMLFormElement>) {
@@ -1699,6 +1715,7 @@ function App() {
             onShowForm={setShowInventoryForm}
             onAddInventory={addInventoryItem}
             onAdjustStock={adjustStock}
+            onExportBackup={(format) => exportModuleBackup("inventory", format)}
           />
         )}
 
@@ -1712,6 +1729,7 @@ function App() {
             currentMember={currentMember}
             onAddOrderRequest={addOrderRequest}
             onUpdateOrderStatus={updateOrderStatus}
+            onExportBackup={(format) => exportModuleBackup("orders", format)}
           />
         )}
 
@@ -1741,6 +1759,7 @@ function App() {
             onArchiveAnimal={archiveMouseAnimal}
             onArchiveBreeding={archiveMouseBreeding}
             onArchiveRecord={archiveMouseRecord}
+            onExportBackup={(format) => exportModuleBackup("mice", format)}
           />
         )}
 
@@ -1765,6 +1784,7 @@ function App() {
             onEditProtocol={openEditProtocolForm}
             onArchiveProtocol={archiveProtocol}
             onStartRun={startRun}
+            onExportBackup={(format) => exportModuleBackup("protocols", format)}
           />
         )}
 
@@ -1784,6 +1804,7 @@ function App() {
             onStartRun={startRun}
             failureDraft={failureDraft}
             onFailureDraftChange={setFailureDraft}
+            onExportBackup={(format) => exportModuleBackup("runs", format)}
           />
         )}
 
@@ -1815,6 +1836,7 @@ function App() {
             onSendDirectMessage={sendDirectMessage}
             onSendAnnouncement={sendAnnouncement}
             onDeleteMessage={deleteMessage}
+            onExportBackup={(format) => exportModuleBackup("messages", format)}
           />
         )}
       </section>
@@ -2107,7 +2129,8 @@ function InventoryView({
   showForm,
   onShowForm,
   onAddInventory,
-  onAdjustStock
+  onAdjustStock,
+  onExportBackup
 }: {
   canManageContent: boolean;
   activeTeamId: string;
@@ -2120,6 +2143,7 @@ function InventoryView({
   onShowForm: (value: boolean) => void;
   onAddInventory: (event: FormEvent<HTMLFormElement>) => void;
   onAdjustStock: (itemId: string, type: InventoryEvent["type"], delta: number, reason: string) => void;
+  onExportBackup: (format: ExportFormat) => void;
 }) {
   const inventoryFormRef = useRef<HTMLFormElement | null>(null);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState("");
@@ -2208,6 +2232,12 @@ function InventoryView({
             新增药品
           </button>
         }
+      />
+
+      <ExportBackupPanel
+        title="药品管理数据导出备份"
+        description="导出药品台账、库存流水和药品图片元数据。"
+        onExport={onExportBackup}
       />
 
       {!canManageContent && (
@@ -2393,7 +2423,8 @@ function OrdersView({
   onQueryChange,
   currentMember,
   onAddOrderRequest,
-  onUpdateOrderStatus
+  onUpdateOrderStatus,
+  onExportBackup
 }: {
   canManageContent: boolean;
   orders: PurchaseOrder[];
@@ -2403,6 +2434,7 @@ function OrdersView({
   currentMember: Member;
   onAddOrderRequest: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  onExportBackup: (format: ExportFormat) => void;
 }) {
   return (
     <div className="page-grid">
@@ -2413,6 +2445,12 @@ function OrdersView({
         searchPlaceholder="搜索药品、供应商、备注或发起人"
         onSearchChange={onQueryChange}
         action={<span className="limit-pill">{orders.length}/{totalOrderCount} 条</span>}
+      />
+
+      <ExportBackupPanel
+        title="药品订购数据导出备份"
+        description="导出订购记录、货号、状态、发起人和备注。"
+        onExport={onExportBackup}
       />
 
       <section className="panel order-panel">
@@ -2520,7 +2558,8 @@ function MouseManagementView({
   onArchiveCage,
   onArchiveAnimal,
   onArchiveBreeding,
-  onArchiveRecord
+  onArchiveRecord,
+  onExportBackup
 }: {
   members: Member[];
   query: string;
@@ -2546,6 +2585,7 @@ function MouseManagementView({
   onArchiveAnimal: (id: string) => void;
   onArchiveBreeding: (id: string) => void;
   onArchiveRecord: (id: string) => void;
+  onExportBackup: (format: ExportFormat) => void;
 }) {
   return (
     <div className="page-grid">
@@ -2556,6 +2596,12 @@ function MouseManagementView({
         searchPlaceholder="搜索小鼠编号、品系、基因型、笼号"
         onSearchChange={onQueryChange}
         action={<span className="limit-pill">团队成员均可维护</span>}
+      />
+
+      <ExportBackupPanel
+        title="小鼠管理数据导出备份"
+        description="导出笼位、小鼠档案、繁殖记录和使用记录。"
+        onExport={onExportBackup}
       />
 
       <section className="mouse-summary-grid">
@@ -2949,7 +2995,8 @@ function ProtocolsView({
   onStepDraftsChange,
   onEditProtocol,
   onArchiveProtocol,
-  onStartRun
+  onStartRun,
+  onExportBackup
 }: {
   canManageContent: boolean;
   currentMember: Member;
@@ -2970,6 +3017,7 @@ function ProtocolsView({
   onEditProtocol: (protocolId: string) => void;
   onArchiveProtocol: (protocolId: string) => void;
   onStartRun: (protocolId: string) => void;
+  onExportBackup: (format: ExportFormat) => void;
 }) {
   function updateStepDraft(stepId: string, field: "title" | "description", value: string) {
     onStepDraftsChange(stepDrafts.map((step) => (step.id === stepId ? { ...step, [field]: value } : step)));
@@ -2998,6 +3046,12 @@ function ProtocolsView({
             上传模板
           </button>
         }
+      />
+
+      <ExportBackupPanel
+        title="实验模板数据导出备份"
+        description="导出模板、标签、参考视频链接、附件元数据和逐步实验步骤。"
+        onExport={onExportBackup}
       />
 
       <UploadAccessPanel />
@@ -3157,7 +3211,8 @@ function RunsView({
   onStartRun,
   onDeleteRun,
   failureDraft,
-  onFailureDraftChange
+  onFailureDraftChange,
+  onExportBackup
 }: {
   members: Member[];
   protocols: Protocol[];
@@ -3173,38 +3228,47 @@ function RunsView({
   onDeleteRun: (runId: string) => void;
   failureDraft: { failureReason: string; failureStepId: string; failureNotes: string };
   onFailureDraftChange: (value: { failureReason: string; failureStepId: string; failureNotes: string }) => void;
+  onExportBackup: (format: ExportFormat) => void;
 }) {
   const protocol = protocols.find((item) => item.id === selectedRun?.protocolId);
   const operator = members.find((member) => member.id === selectedRun?.operatorUserId);
   const completed = selectedRun?.steps.filter((step) => step.completedAt).length ?? 0;
   const total = selectedRun?.steps.length ?? 0;
+  const failureStep = selectedRun?.steps.find((step) => step.id === selectedRun.failureStepId);
 
   return (
-    <div className="runs-layout">
-      <aside className="run-list">
-        <SectionHeader icon={<ClipboardCheck />} title="实验记录" />
-        {!canViewAllRuns && (
-          <div className="run-scope-note">
-            <Lock size={16} />
-            <span>{currentMember.name} 只能查看自己的执行记录</span>
-          </div>
-        )}
-        {runs.map((run) => {
-          const itemProtocol = protocols.find((protocolItem) => protocolItem.id === run.protocolId);
-          const itemOperator = members.find((member) => member.id === run.operatorUserId);
-          return (
-            <button className={`run-list-item ${run.id === selectedRunId ? "active" : ""}`} key={run.id} onClick={() => onSelectRun(run.id)}>
-              <div>
-                <strong>{itemProtocol?.title}</strong>
-                <span>{itemOperator?.name} · {run.startedAt}</span>
-              </div>
-              <ChevronRight size={16} />
-            </button>
-          );
-        })}
-      </aside>
+    <div className="page-grid">
+      <ExportBackupPanel
+        title="执行记录数据导出备份"
+        description={canViewAllRuns ? "导出当前团队可查看范围内的全部执行记录、步骤进度、失败信息和附件元数据。" : "导出你自己的执行记录、步骤进度、失败信息和附件元数据。"}
+        onExport={onExportBackup}
+      />
 
-      <section className="run-detail">
+      <div className="runs-layout">
+        <aside className="run-list">
+          <SectionHeader icon={<ClipboardCheck />} title="实验记录" />
+          {!canViewAllRuns && (
+            <div className="run-scope-note">
+              <Lock size={16} />
+              <span>{currentMember.name} 只能查看自己的执行记录</span>
+            </div>
+          )}
+          {runs.map((run) => {
+            const itemProtocol = protocols.find((protocolItem) => protocolItem.id === run.protocolId);
+            const itemOperator = members.find((member) => member.id === run.operatorUserId);
+            return (
+              <button className={`run-list-item ${run.id === selectedRunId ? "active" : ""}`} key={run.id} onClick={() => onSelectRun(run.id)}>
+                <div>
+                  <strong>{itemProtocol?.title}</strong>
+                  <span>{itemOperator?.name} · {run.startedAt}</span>
+                </div>
+                <ChevronRight size={16} />
+              </button>
+            );
+          })}
+        </aside>
+
+        <section className="run-detail">
         {selectedRun && protocol ? (
           <>
             <div className="run-hero">
@@ -3240,6 +3304,36 @@ function RunsView({
                   <Play size={18} />
                   开启下一次实验
                 </button>
+              </section>
+            )}
+
+            {selectedRun.status !== "IN_PROGRESS" && (
+              <section className="panel run-result-panel">
+                <SectionHeader icon={<ClipboardCheck />} title="实验结果" />
+                <div className="result-summary-grid">
+                  <div>
+                    <span>实验状态</span>
+                    <strong>{selectedRun.resultStatus ? runResultText[selectedRun.resultStatus] : "未填写"}</strong>
+                  </div>
+                  <div>
+                    <span>完成时间</span>
+                    <strong>{selectedRun.completedAt || "未记录"}</strong>
+                  </div>
+                  <div>
+                    <span>失败步骤</span>
+                    <strong>{selectedRun.resultStatus === "FAILED" ? failureStep?.title ?? "未选择" : "不适用"}</strong>
+                  </div>
+                  <div>
+                    <span>失败原因</span>
+                    <strong>{selectedRun.resultStatus === "FAILED" ? selectedRun.failureReason ?? "未填写" : "不适用"}</strong>
+                  </div>
+                </div>
+                {selectedRun.resultStatus === "FAILED" && (
+                  <div className="result-note">
+                    <span>现象与改进</span>
+                    <p>{selectedRun.failureNotes || "未填写"}</p>
+                  </div>
+                )}
               </section>
             )}
 
@@ -3305,17 +3399,12 @@ function RunsView({
               </section>
             )}
 
-            {selectedRun.resultStatus === "FAILED" && (
-              <Notice
-                icon={<AlertTriangle />}
-                text={`失败原因：${selectedRun.failureReason ?? "未填写"}${selectedRun.failureNotes ? `；${selectedRun.failureNotes}` : ""}`}
-              />
-            )}
           </>
         ) : (
           <EmptyState icon={<ClipboardCheck />} text="暂无实验记录" />
         )}
-      </section>
+        </section>
+      </div>
     </div>
   );
 }
@@ -3345,7 +3434,7 @@ function TeamView({
   onUpdateMemberName: (userId: string, currentName: string) => void;
   onRemoveMember: (userId: string, memberName: string) => void;
   onTransferOwner: (userId: string, memberName: string) => void;
-  onExportTeamBackup: () => void;
+  onExportTeamBackup: (format: ExportFormat) => void;
 }) {
   return (
     <div className="page-grid">
@@ -3376,14 +3465,12 @@ function TeamView({
         </div>
       </section>
 
-      <section className="panel export-panel">
-        <SectionHeader icon={<Download />} title="数据导出备份" />
-        <p>导出当前实验室团队的完整 JSON 备份，包含药品、订购、实验模板、执行记录、小鼠管理、消息和文件元数据。文件图片本体不会内嵌在备份文件中。</p>
-        <button className="primary-button" disabled={!canInvite} onClick={onExportTeamBackup}>
-          <Download size={18} />
-          导出团队备份
-        </button>
-      </section>
+      <ExportBackupPanel
+        title="团队完整数据导出备份"
+        description="导出当前实验室团队的完整备份，包含药品、订购、实验模板、执行记录、小鼠管理、消息、文件元数据和审计日志。文件图片本体不会内嵌在备份文件中。"
+        disabled={!canInvite}
+        onExport={onExportTeamBackup}
+      />
 
       <section className="panel">
         <SectionHeader icon={<Users />} title="成员列表" />
@@ -3451,7 +3538,8 @@ function MessagesView({
   announcements,
   onSendDirectMessage,
   onSendAnnouncement,
-  onDeleteMessage
+  onDeleteMessage,
+  onExportBackup
 }: {
   members: Member[];
   currentMember: Member;
@@ -3462,120 +3550,129 @@ function MessagesView({
   onSendDirectMessage: (event: FormEvent<HTMLFormElement>) => void;
   onSendAnnouncement: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteMessage: (messageId: string) => void;
+  onExportBackup: (format: ExportFormat) => void;
 }) {
   const recipients = members.filter((member) => member.id !== currentMember.id);
 
   return (
-    <div className="messages-layout">
-      <section className="panel message-panel system-panel">
-        <SectionHeader icon={<Bell />} title="系统提醒" />
-        <div className="message-list">
-          {systemReminders.map((reminder) => (
-            <article className="message-card reminder-card" key={reminder.id}>
-              <div className="message-card-head">
-                <strong>{reminder.title}</strong>
-                <span>{reminder.daysLeft === 0 ? "今天过期" : `${reminder.daysLeft ?? 0} 天内`}</span>
-              </div>
-              <p>{reminder.body}</p>
-              <div className="message-meta">
-                <span>{reminder.itemName}</span>
-                <span>{reminder.location}</span>
-                <span>{reminder.expiresAt}</span>
-              </div>
-            </article>
-          ))}
-          {systemReminders.length === 0 && <EmptyState icon={<Bell />} text="暂无临期药品提醒" />}
-        </div>
-      </section>
+    <div className="page-grid">
+      <ExportBackupPanel
+        title="消息数据导出备份"
+        description="导出当前可见的系统提醒、成员消息和实验室公告。"
+        onExport={onExportBackup}
+      />
 
-      <section className="panel message-panel direct-panel">
-        <SectionHeader icon={<MessageSquare />} title="成员消息" />
-        <form className="message-form" onSubmit={onSendDirectMessage}>
-          <label>
-            接收人
-            <select name="recipientUserId" required disabled={recipients.length === 0}>
-              <option value="">选择成员</option>
-              {recipients.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            消息内容
-            <textarea name="body" rows={3} required placeholder="输入消息" />
-          </label>
-          <button className="primary-button" type="submit" disabled={recipients.length === 0}>
-            <Send size={18} />
-            发送
-          </button>
-        </form>
-
-        <div className="message-list">
-          {directMessages.map((message) => {
-            const isSent = message.senderUserId === currentMember.id;
-            return (
-              <article className={`message-card direct-message ${isSent ? "sent" : "received"}`} key={message.id}>
+      <div className="messages-layout">
+        <section className="panel message-panel system-panel">
+          <SectionHeader icon={<Bell />} title="系统提醒" />
+          <div className="message-list">
+            {systemReminders.map((reminder) => (
+              <article className="message-card reminder-card" key={reminder.id}>
                 <div className="message-card-head">
-                  <strong>{isSent ? `发给 ${message.recipientName ?? "成员"}` : message.senderName}</strong>
-                  <span>{message.createdAt}</span>
+                  <strong>{reminder.title}</strong>
+                  <span>{reminder.daysLeft === 0 ? "今天过期" : `${reminder.daysLeft ?? 0} 天内`}</span>
                 </div>
-                <p>{message.body}</p>
-                <div className="message-actions">
-                  <button className="text-button danger-text" type="button" onClick={() => onDeleteMessage(message.id)}>
-                    {isSent ? "撤回" : "删除"}
-                  </button>
+                <p>{reminder.body}</p>
+                <div className="message-meta">
+                  <span>{reminder.itemName}</span>
+                  <span>{reminder.location}</span>
+                  <span>{reminder.expiresAt}</span>
                 </div>
               </article>
-            );
-          })}
-          {directMessages.length === 0 && <EmptyState icon={<MessageSquare />} text="暂无成员消息" />}
-        </div>
-      </section>
+            ))}
+            {systemReminders.length === 0 && <EmptyState icon={<Bell />} text="暂无临期药品提醒" />}
+          </div>
+        </section>
 
-      <section className="panel message-panel announcement-panel">
-        <SectionHeader icon={<Megaphone />} title="实验室公告" />
-        {canManageContent && (
-          <form className="message-form" onSubmit={onSendAnnouncement}>
+        <section className="panel message-panel direct-panel">
+          <SectionHeader icon={<MessageSquare />} title="成员消息" />
+          <form className="message-form" onSubmit={onSendDirectMessage}>
             <label>
-              公告标题
-              <input name="title" placeholder="可选" />
+              接收人
+              <select name="recipientUserId" required disabled={recipients.length === 0}>
+                <option value="">选择成员</option>
+                {recipients.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
-              公告内容
-              <textarea name="body" rows={3} required placeholder="输入公告" />
+              消息内容
+              <textarea name="body" rows={3} required placeholder="输入消息" />
             </label>
-            <button className="primary-button" type="submit">
-              <Megaphone size={18} />
-              发布公告
+            <button className="primary-button" type="submit" disabled={recipients.length === 0}>
+              <Send size={18} />
+              发送
             </button>
           </form>
-        )}
 
-        <div className="message-list">
-          {announcements.map((announcement) => (
-            <article className="message-card announcement-card" key={announcement.id}>
-              <div className="message-card-head">
-                <strong>{announcement.title ?? "实验室公告"}</strong>
-                <span>{announcement.createdAt}</span>
-              </div>
-              <p>{announcement.body}</p>
-              <div className="message-meta">
-                <span>{announcement.senderName}</span>
-              </div>
-              {(canManageContent || announcement.senderUserId === currentMember.id) && (
-                <div className="message-actions">
-                  <button className="text-button danger-text" type="button" onClick={() => onDeleteMessage(announcement.id)}>
-                    删除公告
-                  </button>
+          <div className="message-list">
+            {directMessages.map((message) => {
+              const isSent = message.senderUserId === currentMember.id;
+              return (
+                <article className={`message-card direct-message ${isSent ? "sent" : "received"}`} key={message.id}>
+                  <div className="message-card-head">
+                    <strong>{isSent ? `发给 ${message.recipientName ?? "成员"}` : message.senderName}</strong>
+                    <span>{message.createdAt}</span>
+                  </div>
+                  <p>{message.body}</p>
+                  <div className="message-actions">
+                    <button className="text-button danger-text" type="button" onClick={() => onDeleteMessage(message.id)}>
+                      {isSent ? "撤回" : "删除"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {directMessages.length === 0 && <EmptyState icon={<MessageSquare />} text="暂无成员消息" />}
+          </div>
+        </section>
+
+        <section className="panel message-panel announcement-panel">
+          <SectionHeader icon={<Megaphone />} title="实验室公告" />
+          {canManageContent && (
+            <form className="message-form" onSubmit={onSendAnnouncement}>
+              <label>
+                公告标题
+                <input name="title" placeholder="可选" />
+              </label>
+              <label>
+                公告内容
+                <textarea name="body" rows={3} required placeholder="输入公告" />
+              </label>
+              <button className="primary-button" type="submit">
+                <Megaphone size={18} />
+                发布公告
+              </button>
+            </form>
+          )}
+
+          <div className="message-list">
+            {announcements.map((announcement) => (
+              <article className="message-card announcement-card" key={announcement.id}>
+                <div className="message-card-head">
+                  <strong>{announcement.title ?? "实验室公告"}</strong>
+                  <span>{announcement.createdAt}</span>
                 </div>
-              )}
-            </article>
-          ))}
-          {announcements.length === 0 && <EmptyState icon={<Megaphone />} text="暂无实验室公告" />}
-        </div>
-      </section>
+                <p>{announcement.body}</p>
+                <div className="message-meta">
+                  <span>{announcement.senderName}</span>
+                </div>
+                {(canManageContent || announcement.senderUserId === currentMember.id) && (
+                  <div className="message-actions">
+                    <button className="text-button danger-text" type="button" onClick={() => onDeleteMessage(announcement.id)}>
+                      删除公告
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))}
+            {announcements.length === 0 && <EmptyState icon={<Megaphone />} text="暂无实验室公告" />}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -3591,6 +3688,39 @@ function UploadAccessPanel() {
         <span>若想使用本功能，请联系系统负责人 3119314861@qq.com</span>
       </div>
       <span className="limit-pill">200MB</span>
+    </section>
+  );
+}
+
+function ExportBackupPanel({
+  title,
+  description,
+  disabled,
+  onExport
+}: {
+  title: string;
+  description: string;
+  disabled?: boolean;
+  onExport: (format: ExportFormat) => void;
+}) {
+  return (
+    <section className="panel export-panel">
+      <SectionHeader icon={<Download />} title={title} />
+      <p>{description}</p>
+      <div className="export-actions">
+        <button className="secondary-button" disabled={disabled} onClick={() => onExport("json")}>
+          <Download size={18} />
+          导出 JSON
+        </button>
+        <button className="secondary-button" disabled={disabled} onClick={() => onExport("xlsx")}>
+          <Download size={18} />
+          导出 Excel
+        </button>
+        <button className="primary-button" disabled={disabled} onClick={() => onExport("bundle")}>
+          <Archive size={18} />
+          JSON+Excel 打包
+        </button>
+      </div>
     </section>
   );
 }
