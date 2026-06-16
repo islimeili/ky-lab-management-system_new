@@ -19,6 +19,10 @@ const announcementSchema = z.object({
   body: z.string().min(1).max(6000)
 });
 
+const messageParamSchema = z.object({
+  messageId: z.string()
+});
+
 function startOfToday() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -58,9 +62,10 @@ export async function messageRoutes(app: FastifyInstance) {
         where: {
           teamId: query.teamId,
           kind: "DIRECT",
+          deletedAt: null,
           OR: [
-            { senderUserId: request.user.sub },
-            { recipientUserId: request.user.sub }
+            { senderUserId: request.user.sub, senderDeletedAt: null },
+            { recipientUserId: request.user.sub, recipientDeletedAt: null }
           ]
         },
         include: {
@@ -73,7 +78,8 @@ export async function messageRoutes(app: FastifyInstance) {
       app.prisma.teamMessage.findMany({
         where: {
           teamId: query.teamId,
-          kind: "ANNOUNCEMENT"
+          kind: "ANNOUNCEMENT",
+          deletedAt: null
         },
         include: {
           sender: { select: { id: true, name: true, email: true } },
@@ -173,5 +179,83 @@ export async function messageRoutes(app: FastifyInstance) {
     });
 
     await reply.code(201).send({ announcement });
+  });
+
+  app.delete("/messages/:messageId", async (request, reply) => {
+    const params = messageParamSchema.parse(request.params);
+    const message = await app.prisma.teamMessage.findUnique({ where: { id: params.messageId } });
+
+    if (!message || message.deletedAt) {
+      await reply.code(404).send({ message: "消息不存在" });
+      return;
+    }
+
+    const membership = await requireMembership(app, request as AuthenticatedRequest, reply, message.teamId);
+    if (!membership) return;
+
+    if (message.kind === "ANNOUNCEMENT") {
+      if (membership.role !== "OWNER" && membership.role !== "ADMIN" && message.senderUserId !== request.user.sub) {
+        await reply.code(403).send({ message: "仅公告发布人、群主或管理员可以删除公告" });
+        return;
+      }
+
+      const deleted = await app.prisma.teamMessage.update({
+        where: { id: message.id },
+        data: { deletedAt: new Date() }
+      });
+
+      await writeAudit(app, {
+        teamId: message.teamId,
+        userId: request.user.sub,
+        action: "TEAM_ANNOUNCEMENT_DELETED",
+        entity: "team_message",
+        entityId: deleted.id
+      });
+
+      await reply.code(204).send();
+      return;
+    }
+
+    if (message.senderUserId === request.user.sub) {
+      const recalled = await app.prisma.teamMessage.update({
+        where: { id: message.id },
+        data: {
+          deletedAt: new Date(),
+          senderDeletedAt: new Date()
+        }
+      });
+
+      await writeAudit(app, {
+        teamId: message.teamId,
+        userId: request.user.sub,
+        action: "TEAM_DIRECT_MESSAGE_RECALLED",
+        entity: "team_message",
+        entityId: recalled.id,
+        metadata: { recipientUserId: message.recipientUserId }
+      });
+
+      await reply.code(204).send();
+      return;
+    }
+
+    if (message.recipientUserId === request.user.sub) {
+      const deleted = await app.prisma.teamMessage.update({
+        where: { id: message.id },
+        data: { recipientDeletedAt: new Date() }
+      });
+
+      await writeAudit(app, {
+        teamId: message.teamId,
+        userId: request.user.sub,
+        action: "TEAM_DIRECT_MESSAGE_DELETED",
+        entity: "team_message",
+        entityId: deleted.id
+      });
+
+      await reply.code(204).send();
+      return;
+    }
+
+    await reply.code(403).send({ message: "只能删除或撤回与自己有关的消息" });
   });
 }

@@ -48,6 +48,7 @@ enum RunResultStatus {
 
 enum FileKind {
   CHEMICAL_IMAGE
+  CHEMICAL_3D_IMAGE
   PROTOCOL_VIDEO
   PROTOCOL_ATTACHMENT
   RUN_ATTACHMENT
@@ -344,6 +345,9 @@ model TeamMessage {
   kind            TeamMessageKind
   title           String?
   body            String          @db.Text
+  deletedAt       DateTime?
+  senderDeletedAt DateTime?
+  recipientDeletedAt DateTime?
   createdAt       DateTime        @default(now())
   team            Team            @relation(fields: [teamId], references: [id])
   sender          User            @relation("MessageSender", fields: [senderUserId], references: [id])

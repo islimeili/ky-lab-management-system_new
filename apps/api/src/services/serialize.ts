@@ -12,6 +12,7 @@ type InventoryEventLike = {
 
 type FileLike = {
   sizeBytes: bigint | number;
+  kind?: string;
 };
 
 type ExperimentRunLike = Record<string, unknown>;
@@ -21,12 +22,20 @@ export function serializeInventoryItem<T extends InventoryItemLike>(item: T) {
     imageFile?: FileLike | null;
     imageFiles?: FileLike[];
   };
+  const attachedFiles = Array.isArray(record.imageFiles) ? record.imageFiles.map(serializeFile) : record.imageFiles;
+  const imageFiles = Array.isArray(attachedFiles)
+    ? attachedFiles.filter((file) => file.kind !== "CHEMICAL_3D_IMAGE")
+    : attachedFiles;
+  const scanImageFiles = Array.isArray(attachedFiles)
+    ? attachedFiles.filter((file) => file.kind === "CHEMICAL_3D_IMAGE")
+    : [];
 
   return {
     ...item,
     quantity: Number(item.quantity),
     imageFile: record.imageFile ? serializeFile(record.imageFile) : record.imageFile,
-    imageFiles: Array.isArray(record.imageFiles) ? record.imageFiles.map(serializeFile) : record.imageFiles
+    imageFiles,
+    scanImageFiles
   };
 }
 

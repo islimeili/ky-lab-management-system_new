@@ -145,6 +145,7 @@ button:disabled {
 }
 
 .nav-button {
+  position: relative;
   width: 100%;
   height: 44px;
   border: 0;
@@ -167,6 +168,21 @@ button:disabled {
 .nav-button:hover {
   color: #143d32;
   background: #e7f2ec;
+}
+
+.nav-badge {
+  min-width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #d33b42;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .workspace {
@@ -606,6 +622,76 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.smart-capture-panel {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px dashed #a7cfc0;
+  border-radius: 8px;
+  background: #f3fbf7;
+}
+
+.smart-capture-preview {
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  color: #25745f;
+  background: #e5f3ed;
+}
+
+.smart-capture-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.smart-capture-main {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.smart-capture-head,
+.smart-capture-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.smart-capture-head {
+  justify-content: space-between;
+}
+
+.smart-capture-head span {
+  color: #66716a;
+  font-size: 12px;
+}
+
+.smart-capture-controls input {
+  min-width: 0;
+}
+
+.ocr-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ocr-chip-row span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border-radius: 8px;
+  color: #376055;
+  background: #ffffff;
+  font-size: 12px;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -779,6 +865,17 @@ label {
   border: 1px solid #dbe7df;
   border-radius: 8px;
   background: #eef4ef;
+}
+
+.scan-photo-set {
+  display: grid;
+  gap: 6px;
+}
+
+.scan-photo-set > span {
+  color: #66716a;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .chemical-main {
@@ -1399,6 +1496,15 @@ label {
   gap: 8px;
 }
 
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.danger-text {
+  color: #a53e4f;
+}
+
 .reminder-card {
   border-color: #f0d19d;
   background: #fff9ed;
@@ -1654,7 +1760,8 @@ label {
   .member-row,
   .order-row,
   .invite-row,
-  .step-input-card {
+  .step-input-card,
+  .smart-capture-panel {
     grid-template-columns: 1fr;
   }
 

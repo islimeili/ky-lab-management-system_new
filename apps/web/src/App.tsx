@@ -1,4 +1,4 @@
-import {
+﻿import {
   Activity,
   AlertTriangle,
   Archive,
@@ -28,8 +28,8 @@ import {
   Video,
   XCircle
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import "./App.css";
 
 type Role = "OWNER" | "ADMIN" | "MEMBER";
@@ -91,6 +91,7 @@ type InventoryItem = {
   notes?: string;
   imageUrl?: string;
   imageUrls: string[];
+  scanImageUrls: string[];
   updatedAt: string;
 };
 
@@ -248,6 +249,19 @@ type TeamMessage = {
   recipientUserId?: string;
   recipientName?: string;
   createdAt: string;
+  createdAtRaw: string;
+};
+
+type ChemicalOcrFields = {
+  name?: string;
+  supplier?: string;
+  specification?: string;
+  catalogNumber?: string;
+  batchNumber?: string;
+  quantity?: string;
+  unit?: string;
+  expiresAt?: string;
+  notes?: string;
 };
 
 const roleText: Record<Role, string> = {
@@ -331,6 +345,7 @@ function canViewAllRunRecords(member: Member) {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const SESSION_STORAGE_KEY = "labflow-session";
+const MESSAGE_SEEN_STORAGE_KEY = "labflow-message-seen-at";
 
 type ApiRecord = Record<string, unknown>;
 
@@ -362,6 +377,19 @@ function storeSession(session: Session | null) {
   } else {
     localStorage.removeItem(SESSION_STORAGE_KEY);
   }
+}
+
+function readMessageSeenAt(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(MESSAGE_SEEN_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function storeMessageSeenAt(value: Record<string, string>) {
+  localStorage.setItem(MESSAGE_SEEN_STORAGE_KEY, JSON.stringify(value));
 }
 
 async function apiRequest<T>(path: string, token?: string, options: RequestInit = {}): Promise<T> {
@@ -411,6 +439,82 @@ function displayDateOnly(value?: string | null) {
   return date.toISOString().slice(0, 10);
 }
 
+function dateInputFromText(value: string) {
+  const match = value.match(/(20\d{2})[./-](\d{1,2})[./-](\d{1,2})/);
+  if (!match) return undefined;
+  const [, year, month, day] = match;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function parseChemicalOcrText(text: string): ChemicalOcrFields {
+  const compactText = text.replace(/\s+/g, " ").trim();
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const fields: ChemicalOcrFields = {};
+
+  const supplierLine = lines.find((line) => /thermo|fisher|sigma|merck|invitrogen|takara|abcam|bio-rad|biorad|new england|neb/i.test(line));
+  if (supplierLine) {
+    fields.supplier = /thermo|fisher/i.test(supplierLine) ? "Thermo Fisher Scientific" : supplierLine.replace(/^by\s+/i, "");
+  }
+
+  const catalogMatch = compactText.match(/\b(?:REF|Cat(?:alog)?\.?|货号|Item|Part)\s*[:#]?\s*([A-Z0-9][A-Z0-9._-]{3,})/i)
+    ?? compactText.match(/\b([A-Z]\d{5,}[A-Z0-9._-]*)\b/);
+  if (catalogMatch) fields.catalogNumber = catalogMatch[1];
+
+  const batchMatch = compactText.match(/\b(?:Lot|Batch|批号)\s*[:#]?\s*([A-Z0-9._-]{1,})/i);
+  if (batchMatch) fields.batchNumber = batchMatch[1];
+
+  const quantityMatch = compactText.match(/(\d+(?:\.\d+)?)\s*(mL|ml|ML|L|g|mg|kg|μL|uL|µL|瓶|盒|支)\b/);
+  if (quantityMatch) {
+    fields.quantity = quantityMatch[1];
+    fields.unit = quantityMatch[2].replace("μ", "u").replace("µ", "u");
+    fields.specification = `${quantityMatch[1]}${quantityMatch[2]}`;
+  }
+
+  const expiry = dateInputFromText(compactText);
+  if (expiry) fields.expiresAt = expiry;
+
+  const nameLine = lines.find((line) => {
+    const lower = line.toLowerCase();
+    return line.length >= 4
+      && !/ref|cat|lot|batch|qty|store|read|sds|thermo|fisher|invitrogen|for research|usa|canada|emergency/i.test(lower)
+      && /[a-zA-Z]/.test(line);
+  });
+  if (nameLine) {
+    fields.name = nameLine.replace(/^by\s+/i, "").replace(/\s{2,}/g, " ");
+  }
+
+  const storageLine = lines.find((line) => /store|保存|°c|℃|2-8|2.?c.*8.?c/i.test(line));
+  if (storageLine) {
+    fields.notes = storageLine;
+  }
+
+  return fields;
+}
+
+function setNamedFormValue(form: HTMLFormElement, name: string, value?: string) {
+  if (!value) return;
+  const field = form.elements.namedItem(name);
+  if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) {
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+function applyChemicalOcrFields(form: HTMLFormElement, fields: ChemicalOcrFields) {
+  setNamedFormValue(form, "name", fields.name);
+  setNamedFormValue(form, "supplier", fields.supplier);
+  setNamedFormValue(form, "specification", fields.specification);
+  setNamedFormValue(form, "catalogNumber", fields.catalogNumber);
+  setNamedFormValue(form, "batchNumber", fields.batchNumber);
+  setNamedFormValue(form, "quantity", fields.quantity);
+  setNamedFormValue(form, "unit", fields.unit);
+  setNamedFormValue(form, "expiresAt", fields.expiresAt);
+  setNamedFormValue(form, "notes", fields.notes);
+}
+
 function datetimeLocalValue(value?: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -444,6 +548,11 @@ function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
         .map((file) => tokenizedFileUrl(optionalString(asRecord(file).publicUrl), token))
         .filter((url): url is string => Boolean(url))
     : [];
+  const scanImageUrls = Array.isArray(item.scanImageFiles)
+    ? item.scanImageFiles
+        .map((file) => tokenizedFileUrl(optionalString(asRecord(file).publicUrl), token))
+        .filter((url): url is string => Boolean(url))
+    : [];
   const legacyImageUrl = tokenizedFileUrl(optionalString(imageFile.publicUrl), token);
   const allImageUrls = Array.from(new Set([...(legacyImageUrl ? [legacyImageUrl] : []), ...imageUrls]));
 
@@ -465,6 +574,7 @@ function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
     notes: optionalString(item.notes),
     imageUrl: allImageUrls[0],
     imageUrls: allImageUrls,
+    scanImageUrls,
     updatedAt: displayDate(stringValue(item.updatedAt))
   };
 }
@@ -650,7 +760,8 @@ function mapTeamMessage(message: ApiRecord): TeamMessage {
     senderName: stringValue(sender.name, "未知成员"),
     recipientUserId: optionalString(message.recipientUserId),
     recipientName: optionalString(recipient.name),
-    createdAt: displayDate(stringValue(message.createdAt))
+    createdAt: displayDate(stringValue(message.createdAt)),
+    createdAtRaw: stringValue(message.createdAt)
   };
 }
 
@@ -743,6 +854,7 @@ function App() {
   const [inviteLink, setInviteLink] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [messageSeenAt, setMessageSeenAt] = useState<Record<string, string>>(() => readMessageSeenAt());
 
   const activeTeam = teams.find((team) => team.id === activeTeamId);
   const currentMember = members.find((member) => member.id === session?.user.id) ?? {
@@ -756,6 +868,20 @@ function App() {
   const canManageContent = canManage(currentMember.role);
   const isOwner = currentMember.role === "OWNER";
   const canViewAllRuns = canViewAllRunRecords(currentMember);
+  const messageBadgeCount = useMemo(() => {
+    if (!activeTeamId || activeTab === "messages") return 0;
+    const seenTime = new Date(messageSeenAt[activeTeamId] ?? 0).getTime();
+    const receivedDirectCount = directMessages.filter((message) => {
+      if (message.recipientUserId !== session?.user.id) return false;
+      const createdTime = new Date(message.createdAtRaw).getTime();
+      return Number.isNaN(createdTime) || createdTime > seenTime;
+    }).length;
+    const announcementCount = announcements.filter((announcement) => {
+      const createdTime = new Date(announcement.createdAtRaw).getTime();
+      return Number.isNaN(createdTime) || createdTime > seenTime;
+    }).length;
+    return receivedDirectCount + announcementCount;
+  }, [activeTab, activeTeamId, announcements, directMessages, messageSeenAt, session?.user.id]);
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0];
   const selectedVisibleRunId = selectedRun?.id ?? "";
   const editingProtocol = protocols.find((protocol) => protocol.id === editingProtocolId);
@@ -812,6 +938,21 @@ function App() {
     const text = `${animal.animalCode} ${animal.strain ?? ""} ${animal.genotype ?? ""} ${animal.cageCode ?? ""} ${animal.supplier ?? ""} ${animal.notes ?? ""}`.toLowerCase();
     return text.includes(mouseQuery.toLowerCase());
   });
+
+  function markMessagesSeen(teamId: string) {
+    setMessageSeenAt((current) => {
+      const next = { ...current, [teamId]: new Date().toISOString() };
+      storeMessageSeenAt(next);
+      return next;
+    });
+  }
+
+  function changeTab(tab: TabKey) {
+    if (tab === "messages" && activeTeamId) {
+      markMessagesSeen(activeTeamId);
+    }
+    setActiveTab(tab);
+  }
 
   async function loadWorkspace(nextSession = session, requestedTeamId = activeTeamId) {
     if (!nextSession) return;
@@ -876,6 +1017,9 @@ function App() {
       setSystemReminders(messagePayload.systemReminders.map(mapSystemReminder));
       setDirectMessages(messagePayload.directMessages.map(mapTeamMessage));
       setAnnouncements(messagePayload.announcements.map(mapTeamMessage));
+      if (activeTab === "messages") {
+        markMessagesSeen(resolvedTeamId);
+      }
       setSelectedRunId((current) => nextRuns.some((run) => run.id === current) ? current : nextRuns[0]?.id ?? "");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "加载数据失败");
@@ -1092,6 +1236,12 @@ function App() {
     await loadWorkspace(session, activeTeamId);
   }
 
+  async function deleteMessage(messageId: string) {
+    if (!session || !activeTeamId || !window.confirm("确定删除或撤回这条内容吗？")) return;
+    await apiRequest(`/messages/${messageId}`, session.token, { method: "DELETE" });
+    await loadWorkspace(session, activeTeamId);
+  }
+
   function openNewProtocolForm() {
     setEditingProtocolId(null);
     setProtocolStepDrafts([{ id: makeId("draft"), title: "", description: "" }]);
@@ -1128,6 +1278,7 @@ function App() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const images = form.getAll("images").filter((value): value is File => value instanceof File && value.size > 0);
+    const scanImages = form.getAll("scanImages").filter((value): value is File => value instanceof File && value.size > 0);
 
     const imageFileIds: string[] = [];
     for (const image of images) {
@@ -1138,6 +1289,17 @@ function App() {
         body: fileForm
       });
       imageFileIds.push(filePayload.file.id);
+    }
+
+    const scanImageFileIds: string[] = [];
+    for (const image of scanImages) {
+      const fileForm = new FormData();
+      fileForm.set("file", image);
+      const filePayload = await apiRequest<{ file: { id: string } }>(`/files?teamId=${activeTeamId}&kind=CHEMICAL_3D_IMAGE`, session.token, {
+        method: "POST",
+        body: fileForm
+      });
+      scanImageFileIds.push(filePayload.file.id);
     }
 
     await apiRequest("/inventory", session.token, {
@@ -1158,7 +1320,8 @@ function App() {
         hazardTags: splitTags(String(form.get("hazardTags") ?? "")),
         notes: nullableFormValue(form, "notes"),
         imageFileId: imageFileIds[0],
-        imageFileIds
+        imageFileIds,
+        scanImageFileIds
       })
     });
 
@@ -1464,14 +1627,14 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="主导航">
-          <NavButton icon={<ClipboardCheck />} label="工作台" tab="dashboard" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<Package />} label="药品管理" tab="inventory" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<ShoppingCart />} label="药品订购" tab="orders" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<Activity />} label="小鼠管理" tab="mice" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<FlaskConical />} label="实验模板" tab="protocols" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<CheckCircle2 />} label="执行记录" tab="runs" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<Users />} label="团队权限" tab="team" activeTab={activeTab} onClick={setActiveTab} />
-          <NavButton icon={<MessageSquare />} label="消息" tab="messages" activeTab={activeTab} onClick={setActiveTab} />
+          <NavButton icon={<ClipboardCheck />} label="工作台" tab="dashboard" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<Package />} label="药品管理" tab="inventory" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<ShoppingCart />} label="药品订购" tab="orders" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<Activity />} label="小鼠管理" tab="mice" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<FlaskConical />} label="实验模板" tab="protocols" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<CheckCircle2 />} label="执行记录" tab="runs" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<Users />} label="团队权限" tab="team" activeTab={activeTab} onClick={changeTab} />
+          <NavButton icon={<MessageSquare />} label="消息" tab="messages" activeTab={activeTab} onClick={changeTab} badgeCount={messageBadgeCount} />
         </nav>
       </aside>
 
@@ -1503,7 +1666,7 @@ function App() {
         {loading && <Notice icon={<RefreshCcw />} text="正在同步服务器数据..." />}
 
         {activeTab === "dashboard" && (
-          <Dashboard stats={stats} events={events} inventory={inventory} protocols={protocols} runs={runs} onOpenTab={setActiveTab} />
+          <Dashboard stats={stats} events={events} inventory={inventory} protocols={protocols} runs={runs} onOpenTab={changeTab} />
         )}
 
         {activeTab === "inventory" && (
@@ -1631,6 +1794,7 @@ function App() {
             announcements={announcements}
             onSendDirectMessage={sendDirectMessage}
             onSendAnnouncement={sendAnnouncement}
+            onDeleteMessage={deleteMessage}
           />
         )}
       </section>
@@ -1783,18 +1947,22 @@ function NavButton({
   label,
   tab,
   activeTab,
-  onClick
+  onClick,
+  badgeCount = 0
 }: {
   icon: ReactNode;
   label: string;
   tab: TabKey;
   activeTab: TabKey;
   onClick: (tab: TabKey) => void;
+  badgeCount?: number;
 }) {
+  const badgeText = badgeCount > 99 ? "99+" : String(badgeCount);
   return (
     <button className={`nav-button ${activeTab === tab ? "active" : ""}`} onClick={() => onClick(tab)}>
       {icon}
       <span>{label}</span>
+      {badgeCount > 0 && <span className="nav-badge">{badgeText}</span>}
     </button>
   );
 }
@@ -1929,6 +2097,48 @@ function InventoryView({
   onAddInventory: (event: FormEvent<HTMLFormElement>) => void;
   onAdjustStock: (itemId: string, type: InventoryEvent["type"], delta: number, reason: string) => void;
 }) {
+  const inventoryFormRef = useRef<HTMLFormElement | null>(null);
+  const [ocrPreviewUrl, setOcrPreviewUrl] = useState("");
+  const [ocrStatus, setOcrStatus] = useState("");
+  const [ocrFields, setOcrFields] = useState<ChemicalOcrFields>({});
+
+  useEffect(() => {
+    return () => {
+      if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+    };
+  }, [ocrPreviewUrl]);
+
+  function handleRecognitionImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+    setOcrPreviewUrl(file ? URL.createObjectURL(file) : "");
+    setOcrStatus("");
+    setOcrFields({});
+  }
+
+  async function runChemicalOcr() {
+    const form = inventoryFormRef.current;
+    const field = form?.elements.namedItem("recognitionImage");
+    const file = field instanceof HTMLInputElement ? field.files?.[0] : undefined;
+    if (!form || !file) {
+      setOcrStatus("请选择标签照片");
+      return;
+    }
+
+    setOcrStatus("识别中...");
+    try {
+      const tesseract = await import("tesseract.js");
+      const result = await tesseract.recognize(file, "eng");
+      const text = result.data.text;
+      const fields = parseChemicalOcrText(text);
+      setOcrFields(fields);
+      applyChemicalOcrFields(form, fields);
+      setOcrStatus(Object.keys(fields).length > 0 ? "识别结果已填入表单" : "未识别到可填字段");
+    } catch {
+      setOcrStatus("识别失败，请换一张更清晰的标签照片");
+    }
+  }
+
   return (
     <div className="page-grid">
       <Toolbar
@@ -1952,10 +2162,37 @@ function InventoryView({
       {showForm && (
         <section className="panel">
           <SectionHeader icon={<Camera />} title="拍照录入药品" />
-          <form className="inventory-form" onSubmit={onAddInventory}>
+          <form className="inventory-form" onSubmit={onAddInventory} ref={inventoryFormRef}>
+            <div className="smart-capture-panel wide">
+              <div className="smart-capture-preview">
+                {ocrPreviewUrl ? <img src={ocrPreviewUrl} alt="OCR 标签照片" /> : <Camera size={26} />}
+              </div>
+              <div className="smart-capture-main">
+                <div className="smart-capture-head">
+                  <strong>智能拍照识别</strong>
+                  {ocrStatus && <span>{ocrStatus}</span>}
+                </div>
+                <div className="smart-capture-controls">
+                  <input name="recognitionImage" type="file" accept="image/*" capture="environment" onChange={handleRecognitionImageChange} />
+                  <button className="secondary-button" type="button" onClick={runChemicalOcr}>
+                    <RefreshCcw size={18} />
+                    识别填表
+                  </button>
+                </div>
+                {Object.keys(ocrFields).length > 0 && (
+                  <div className="ocr-chip-row">
+                    {Object.entries(ocrFields).map(([key, value]) => value && <span key={key}>{value}</span>)}
+                  </div>
+                )}
+              </div>
+            </div>
             <label>
               药品图片
               <input name="images" type="file" accept="image/*" capture="environment" multiple />
+            </label>
+            <label>
+              3D扫描照片
+              <input name="scanImages" type="file" accept="image/*" capture="environment" multiple />
             </label>
             <label>
               药品名称
@@ -2053,6 +2290,16 @@ function InventoryView({
                     {item.imageUrls.map((url, index) => (
                       <img key={url} src={url} alt={`${item.name} 图片 ${index + 1}`} />
                     ))}
+                  </div>
+                )}
+                {item.scanImageUrls.length > 0 && (
+                  <div className="scan-photo-set">
+                    <span>3D扫描照片</span>
+                    <div className="chemical-thumbs">
+                      {item.scanImageUrls.map((url, index) => (
+                        <img key={url} src={url} alt={`${item.name} 3D扫描照片 ${index + 1}`} />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -3151,7 +3398,8 @@ function MessagesView({
   directMessages,
   announcements,
   onSendDirectMessage,
-  onSendAnnouncement
+  onSendAnnouncement,
+  onDeleteMessage
 }: {
   members: Member[];
   currentMember: Member;
@@ -3161,6 +3409,7 @@ function MessagesView({
   announcements: TeamMessage[];
   onSendDirectMessage: (event: FormEvent<HTMLFormElement>) => void;
   onSendAnnouncement: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteMessage: (messageId: string) => void;
 }) {
   const recipients = members.filter((member) => member.id !== currentMember.id);
 
@@ -3221,6 +3470,11 @@ function MessagesView({
                   <span>{message.createdAt}</span>
                 </div>
                 <p>{message.body}</p>
+                <div className="message-actions">
+                  <button className="text-button danger-text" type="button" onClick={() => onDeleteMessage(message.id)}>
+                    {isSent ? "撤回" : "删除"}
+                  </button>
+                </div>
               </article>
             );
           })}
@@ -3258,6 +3512,13 @@ function MessagesView({
               <div className="message-meta">
                 <span>{announcement.senderName}</span>
               </div>
+              {(canManageContent || announcement.senderUserId === currentMember.id) && (
+                <div className="message-actions">
+                  <button className="text-button danger-text" type="button" onClick={() => onDeleteMessage(announcement.id)}>
+                    删除公告
+                  </button>
+                </div>
+              )}
             </article>
           ))}
           {announcements.length === 0 && <EmptyState icon={<Megaphone />} text="暂无实验室公告" />}
