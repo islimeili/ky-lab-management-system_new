@@ -9,6 +9,7 @@
   ChevronRight,
   ClipboardCheck,
   Crown,
+  Download,
   FlaskConical,
   Image as ImageIcon,
   Lock,
@@ -1202,6 +1203,42 @@ function App() {
     setInviteLink(`${window.location.origin}${window.location.pathname}?invite=${payload.invite.token}`);
   }
 
+  async function exportTeamBackup() {
+    if (!session || !activeTeamId || !canManageContent) return;
+    setErrorMessage("");
+    try {
+      const response = await fetch(`${API_BASE}/exports/team?teamId=${encodeURIComponent(activeTeamId)}`, {
+        headers: { Authorization: `Bearer ${session.token}` }
+      });
+
+      if (!response.ok) {
+        let message = `导出失败：${response.status}`;
+        try {
+          const payload = await response.json() as { message?: string };
+          message = payload.message ?? message;
+        } catch {
+          // Keep the HTTP status message when the server did not return JSON.
+        }
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const encodedName = disposition.match(/filename="([^"]+)"/)?.[1];
+      const fileName = encodedName ? decodeURIComponent(encodedName) : `lab-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "导出失败");
+    }
+  }
+
   async function sendDirectMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || !activeTeamId) return;
@@ -1781,6 +1818,7 @@ function App() {
             onUpdateMemberName={updateMemberName}
             onRemoveMember={removeMember}
             onTransferOwner={transferOwner}
+            onExportTeamBackup={exportTeamBackup}
           />
         )}
 
@@ -3290,7 +3328,8 @@ function TeamView({
   onToggleRunVisibility,
   onUpdateMemberName,
   onRemoveMember,
-  onTransferOwner
+  onTransferOwner,
+  onExportTeamBackup
 }: {
   members: Member[];
   currentMember: Member;
@@ -3303,6 +3342,7 @@ function TeamView({
   onUpdateMemberName: (userId: string, currentName: string) => void;
   onRemoveMember: (userId: string, memberName: string) => void;
   onTransferOwner: (userId: string, memberName: string) => void;
+  onExportTeamBackup: () => void;
 }) {
   return (
     <div className="page-grid">
@@ -3331,6 +3371,15 @@ function TeamView({
           </button>
           {inviteLink && <input value={inviteLink} readOnly onFocus={(event) => event.currentTarget.select()} />}
         </div>
+      </section>
+
+      <section className="panel export-panel">
+        <SectionHeader icon={<Download />} title="数据导出备份" />
+        <p>导出当前实验室团队的完整 JSON 备份，包含药品、订购、实验模板、执行记录、小鼠管理、消息和文件元数据。文件图片本体不会内嵌在备份文件中。</p>
+        <button className="primary-button" disabled={!canInvite} onClick={onExportTeamBackup}>
+          <Download size={18} />
+          导出团队备份
+        </button>
       </section>
 
       <section className="panel">

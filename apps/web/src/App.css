@@ -1340,10 +1340,20 @@ label {
   gap: 12px;
 }
 
-.invite-panel p {
+.invite-panel p,
+.export-panel p {
   margin: 0;
   color: #67726b;
   font-size: 13px;
+}
+
+.export-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.export-panel .primary-button {
+  justify-self: start;
 }
 
 .invite-row {

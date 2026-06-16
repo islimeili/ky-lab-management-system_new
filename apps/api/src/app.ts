@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 import { authPlugin } from "./plugins/auth.js";
 import { prismaPlugin } from "./plugins/prisma.js";
 import { authRoutes } from "./routes/auth.js";
+import { exportRoutes } from "./routes/exports.js";
 import { fileRoutes } from "./routes/files.js";
 import { inventoryRoutes } from "./routes/inventory.js";
 import { messageRoutes } from "./routes/messages.js";
@@ -74,6 +75,7 @@ export async function buildApp() {
   await app.register(protocolRoutes);
   await app.register(runRoutes);
   await app.register(fileRoutes);
+  await app.register(exportRoutes);
 
   return app;
 }
