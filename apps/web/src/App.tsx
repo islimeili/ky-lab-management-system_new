@@ -92,7 +92,6 @@ type InventoryItem = {
   notes?: string;
   imageUrl?: string;
   imageUrls: string[];
-  scanImageUrls: string[];
   updatedAt: string;
 };
 
@@ -549,11 +548,6 @@ function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
         .map((file) => tokenizedFileUrl(optionalString(asRecord(file).publicUrl), token))
         .filter((url): url is string => Boolean(url))
     : [];
-  const scanImageUrls = Array.isArray(item.scanImageFiles)
-    ? item.scanImageFiles
-        .map((file) => tokenizedFileUrl(optionalString(asRecord(file).publicUrl), token))
-        .filter((url): url is string => Boolean(url))
-    : [];
   const legacyImageUrl = tokenizedFileUrl(optionalString(imageFile.publicUrl), token);
   const allImageUrls = Array.from(new Set([...(legacyImageUrl ? [legacyImageUrl] : []), ...imageUrls]));
 
@@ -575,7 +569,6 @@ function mapInventoryItem(item: ApiRecord, token: string): InventoryItem {
     notes: optionalString(item.notes),
     imageUrl: allImageUrls[0],
     imageUrls: allImageUrls,
-    scanImageUrls,
     updatedAt: displayDate(stringValue(item.updatedAt))
   };
 }
@@ -1315,7 +1308,6 @@ function App() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const images = form.getAll("images").filter((value): value is File => value instanceof File && value.size > 0);
-    const scanImages = form.getAll("scanImages").filter((value): value is File => value instanceof File && value.size > 0);
 
     const imageFileIds: string[] = [];
     for (const image of images) {
@@ -1326,17 +1318,6 @@ function App() {
         body: fileForm
       });
       imageFileIds.push(filePayload.file.id);
-    }
-
-    const scanImageFileIds: string[] = [];
-    for (const image of scanImages) {
-      const fileForm = new FormData();
-      fileForm.set("file", image);
-      const filePayload = await apiRequest<{ file: { id: string } }>(`/files?teamId=${activeTeamId}&kind=CHEMICAL_3D_IMAGE`, session.token, {
-        method: "POST",
-        body: fileForm
-      });
-      scanImageFileIds.push(filePayload.file.id);
     }
 
     await apiRequest("/inventory", session.token, {
@@ -1357,8 +1338,7 @@ function App() {
         hazardTags: splitTags(String(form.get("hazardTags") ?? "")),
         notes: nullableFormValue(form, "notes"),
         imageFileId: imageFileIds[0],
-        imageFileIds,
-        scanImageFileIds
+        imageFileIds
       })
     });
 
@@ -1709,6 +1689,8 @@ function App() {
         {activeTab === "inventory" && (
           <InventoryView
             canManageContent={canManageContent}
+            activeTeamId={activeTeamId}
+            token={session.token}
             query={inventoryQuery}
             onQueryChange={setInventoryQuery}
             items={filteredInventory}
@@ -2116,6 +2098,8 @@ function StatCard({ icon, label, value, tone }: { icon: ReactNode; label: string
 
 function InventoryView({
   canManageContent,
+  activeTeamId,
+  token,
   query,
   onQueryChange,
   items,
@@ -2126,6 +2110,8 @@ function InventoryView({
   onAdjustStock
 }: {
   canManageContent: boolean;
+  activeTeamId: string;
+  token: string;
   query: string;
   onQueryChange: (value: string) => void;
   items: InventoryItem[];
@@ -2165,13 +2151,44 @@ function InventoryView({
 
     setOcrStatus("识别中...");
     try {
-      const tesseract = await import("tesseract.js");
-      const result = await tesseract.recognize(file, "eng");
-      const text = result.data.text;
+      let text = "";
+      let provider = "浏览器本地 OCR";
+
+      try {
+        const payload = new FormData();
+        payload.set("file", file);
+        const response = await fetch(`${API_BASE}/vision/chemical-ocr?teamId=${encodeURIComponent(activeTeamId)}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: payload
+        });
+
+        if (response.ok) {
+          const result = await response.json() as { rawText?: string; provider?: string };
+          text = result.rawText ?? "";
+          provider = result.provider ?? "JavaVision";
+        } else if (response.status !== 503 && response.status !== 502) {
+          const payload = await response.json().catch(() => ({})) as { message?: string };
+          const error = new Error(payload.message ?? `识别失败：${response.status}`);
+          error.name = "ChemicalOcrError";
+          throw error;
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "ChemicalOcrError") {
+          throw error;
+        }
+      }
+
+      if (!text) {
+        const tesseract = await import("tesseract.js");
+        const result = await tesseract.recognize(file, "eng");
+        text = result.data.text;
+      }
+
       const fields = parseChemicalOcrText(text);
       setOcrFields(fields);
       applyChemicalOcrFields(form, fields);
-      setOcrStatus(Object.keys(fields).length > 0 ? "识别结果已填入表单" : "未识别到可填字段");
+      setOcrStatus(Object.keys(fields).length > 0 ? `${provider} 结果已填入表单` : "未识别到可填字段");
     } catch {
       setOcrStatus("识别失败，请换一张更清晰的标签照片");
     }
@@ -2227,10 +2244,6 @@ function InventoryView({
             <label>
               药品图片
               <input name="images" type="file" accept="image/*" capture="environment" multiple />
-            </label>
-            <label>
-              3D扫描照片
-              <input name="scanImages" type="file" accept="image/*" capture="environment" multiple />
             </label>
             <label>
               药品名称
@@ -2328,16 +2341,6 @@ function InventoryView({
                     {item.imageUrls.map((url, index) => (
                       <img key={url} src={url} alt={`${item.name} 图片 ${index + 1}`} />
                     ))}
-                  </div>
-                )}
-                {item.scanImageUrls.length > 0 && (
-                  <div className="scan-photo-set">
-                    <span>3D扫描照片</span>
-                    <div className="chemical-thumbs">
-                      {item.scanImageUrls.map((url, index) => (
-                        <img key={url} src={url} alt={`${item.name} 3D扫描照片 ${index + 1}`} />
-                      ))}
-                    </div>
                   </div>
                 )}
               </div>

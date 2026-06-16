@@ -867,17 +867,6 @@ label {
   background: #eef4ef;
 }
 
-.scan-photo-set {
-  display: grid;
-  gap: 6px;
-}
-
-.scan-photo-set > span {
-  color: #66716a;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .chemical-main {
   min-width: 0;
   display: grid;

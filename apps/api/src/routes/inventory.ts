@@ -21,8 +21,7 @@ const inventorySchema = z.object({
   hazardTags: z.array(z.string()).optional(),
   notes: z.string().optional().nullable(),
   imageFileId: z.string().optional().nullable(),
-  imageFileIds: z.array(z.string()).optional(),
-  scanImageFileIds: z.array(z.string()).optional()
+  imageFileIds: z.array(z.string()).optional()
 });
 
 const updateInventorySchema = inventorySchema.omit({ teamId: true, quantity: true }).partial();
@@ -177,19 +176,6 @@ export async function inventoryRoutes(app: FastifyInstance) {
         });
       }
 
-      const scanImageFileIds = Array.from(new Set(body.scanImageFileIds ?? []));
-
-      if (scanImageFileIds.length > 0) {
-        await tx.fileAsset.updateMany({
-          where: {
-            id: { in: scanImageFileIds },
-            teamId: body.teamId,
-            kind: "CHEMICAL_3D_IMAGE"
-          },
-          data: { inventoryItemId: created.id }
-        });
-      }
-
       await tx.inventoryEvent.create({
         data: {
           teamId: body.teamId,
@@ -235,7 +221,7 @@ export async function inventoryRoutes(app: FastifyInstance) {
     const membership = await requireOwnerOrAdmin(app, request as AuthenticatedRequest, reply, item.teamId);
     if (!membership) return;
 
-    const { imageFileIds: _imageFileIds, scanImageFileIds: _scanImageFileIds, ...inventoryData } = body;
+    const { imageFileIds: _imageFileIds, ...inventoryData } = body;
     const updated = await app.prisma.inventoryItem.update({
       where: { id: params.itemId },
       data: {

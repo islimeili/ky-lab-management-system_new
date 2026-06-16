@@ -12,10 +12,10 @@ import {
 import { serializeFile } from "../services/serialize.js";
 import { writeAudit } from "../services/audit.js";
 
-const fileKindSchema = z.enum(["CHEMICAL_IMAGE", "CHEMICAL_3D_IMAGE", "PROTOCOL_VIDEO", "PROTOCOL_ATTACHMENT", "RUN_ATTACHMENT"]);
+const fileKindSchema = z.enum(["CHEMICAL_IMAGE", "PROTOCOL_VIDEO", "PROTOCOL_ATTACHMENT", "RUN_ATTACHMENT"]);
 
 function isChemicalImage(kind: string) {
-  return kind === "CHEMICAL_IMAGE" || kind === "CHEMICAL_3D_IMAGE";
+  return kind === "CHEMICAL_IMAGE";
 }
 
 export async function fileRoutes(app: FastifyInstance) {

@@ -14,6 +14,7 @@ import { orderRoutes } from "./routes/orders.js";
 import { protocolRoutes } from "./routes/protocols.js";
 import { runRoutes } from "./routes/runs.js";
 import { teamRoutes } from "./routes/teams.js";
+import { visionRoutes } from "./routes/vision.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -76,6 +77,7 @@ export async function buildApp() {
   await app.register(runRoutes);
   await app.register(fileRoutes);
   await app.register(exportRoutes);
+  await app.register(visionRoutes);
 
   return app;
 }
